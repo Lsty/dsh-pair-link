@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.10'
+const VERSION = '0.4.11'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -1071,6 +1071,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
       publishError: runtime.publishError,
       endpointSource: runtime.endpointSource,
       endpointUpdatedAt: runtime.endpointUpdatedAt,
+      giteeRepo: runtime.giteeRepo,
     })
   })
 
@@ -1223,6 +1224,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
     if (typeof body?.secret === 'string' && body.secret.trim()) patch.secret = body.secret.trim()
     if (typeof body?.bridgeToken === 'string' && body.bridgeToken.trim()) patch.bridgeToken = body.bridgeToken.trim()
     if (typeof body?.bridgePassword === 'string' && body.bridgePassword.trim()) patch.bridgePassword = body.bridgePassword.trim()
+    if (typeof body?.giteeRepo === 'string' && body.giteeRepo.trim()) patch.giteeRepo = body.giteeRepo.trim()
 
     const nextRemote = resolveRemote(
       patch.pairUrl ?? runtime.remote?.httpOrigin ?? '',
@@ -1240,6 +1242,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
 
     if (patch.secret) runtime.secret = patch.secret
     if (patch.bridgePassword) runtime.bridgePassword = patch.bridgePassword
+    if (patch.giteeRepo) runtime.giteeRepo = patch.giteeRepo
     runtime.bridgeCookie = ''
     runtime.remote = nextRemote
     runtime.approvals.clear()
@@ -1518,6 +1521,54 @@ function scheduleReconnect(ctx, runtime) {
 // ---------------------------------------------------------------------------
 // 专用隧道：电脑端自己起一条 cloudflared，把地址显示给手机端
 // ---------------------------------------------------------------------------
+function tunnelStatePath() {
+  return join(dshHome(), 'dsh-pair-link-tunnel.json')
+}
+
+function readTunnelState() {
+  try {
+    return JSON.parse(readFileSync(tunnelStatePath(), 'utf8'))
+  } catch {
+    return null
+  }
+}
+
+function writeTunnelState(patch) {
+  try {
+    const current = readTunnelState() ?? {}
+    writeFileSync(tunnelStatePath(), `${JSON.stringify({ ...current, ...patch }, null, 2)}\n`, 'utf8')
+  } catch { /* ignore */ }
+}
+
+function pidAlive(pid) {
+  const value = Number(pid)
+  if (!Number.isInteger(value) || value <= 0) return false
+  try {
+    process.kill(value, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * 插件重载时不要换隧道：上次那个 cloudflared 还活着就复用它的地址，
+ * 否则每次重载都会把手机端甩到一个已经不存在的 URL 上。
+ */
+function reuseTunnelIfAny(runtime, origin) {
+  const saved = readTunnelState()
+  if (!saved || !saved.url || !saved.pid) return false
+  if (!pidAlive(saved.pid)) return false
+  if (saved.origin && saved.origin !== origin) {
+    try { process.kill(Number(saved.pid)) } catch { /* ignore */ }
+    return false
+  }
+  runtime.publicUrl = String(saved.url)
+  runtime.tunnelState = 'ready'
+  runtime.tunnelReused = true
+  return true
+}
+
 function startQuickTunnel(ctx, runtime) {
   if (!runtime.autoTunnel || runtime.tunnel || runtime.stopped) return
   if (runtime.remote) return // 已是对端（手机），不需要再暴露自己
@@ -1530,10 +1581,19 @@ function startQuickTunnel(ctx, runtime) {
     return
   }
 
+  if (reuseTunnelIfAny(runtime, origin)) {
+    ctx.logger?.info?.('dsh-pair-link: 复用现有隧道 %s（重载不换地址）', runtime.publicUrl)
+    void publishEndpoint(runtime).catch((err) => {
+      runtime.publishError = String(err?.message ?? err)
+    })
+    return
+  }
+
   let child
   try {
     child = spawn(runtime.cloudflaredPath, ['tunnel', '--url', origin, '--no-autoupdate'], {
       windowsHide: true,
+      detached: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     })
   } catch (err) {
@@ -1542,10 +1602,12 @@ function startQuickTunnel(ctx, runtime) {
     ctx.logger?.warn?.('dsh-pair-link: 专用隧道启动失败：%s', runtime.tunnelError)
     return
   }
+  child.unref?.()
 
   runtime.tunnel = child
   runtime.tunnelState = 'starting'
   runtime.tunnelError = null
+  writeTunnelState({ pid: child.pid, origin, url: null, startedAt: Date.now() })
   let settled = false
 
   const scan = (chunk) => {
@@ -1556,6 +1618,7 @@ function startQuickTunnel(ctx, runtime) {
       runtime.publicUrl = match[0]
       runtime.tunnelState = 'ready'
       if (runtime.tunnelTimer) { clearTimeout(runtime.tunnelTimer); runtime.tunnelTimer = null }
+      writeTunnelState({ pid: child.pid, origin, url: runtime.publicUrl, startedAt: Date.now() })
       ctx.logger?.info?.('dsh-pair-link: 专用隧道就绪 %s', runtime.publicUrl)
       void publishEndpoint(runtime).catch((err) => {
         runtime.publishError = String(err?.message ?? err)
@@ -1591,12 +1654,10 @@ function stopTunnel(runtime) {
     clearTimeout(runtime.tunnelTimer)
     runtime.tunnelTimer = null
   }
-  const child = runtime.tunnel
+  // 故意不杀 cloudflared：重载后新实例复用同一地址，避免手机端被甩掉。
   runtime.tunnel = null
   runtime.tunnelState = 'off'
   runtime.publicUrl = ''
-  if (!child) return
-  try { child.kill() } catch { /* ignore */ }
 }
 
 // ---------------------------------------------------------------------------

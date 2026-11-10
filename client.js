@@ -591,6 +591,7 @@ window.__ModuleLoader__.load({
       const [secret, setSecret] = React.useState('')
       const [bridgeToken, setBridgeToken] = React.useState('')
       const [bridgePassword, setBridgePassword] = React.useState('')
+      const [giteeRepo, setGiteeRepo] = React.useState(info && info.giteeRepo ? info.giteeRepo : '')
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
       const [saved, setSaved] = React.useState(false)
@@ -604,6 +605,7 @@ window.__ModuleLoader__.load({
           if (secret.trim()) body.secret = secret.trim()
           if (bridgeToken.trim()) body.bridgeToken = bridgeToken.trim()
           if (bridgePassword.trim()) body.bridgePassword = bridgePassword.trim()
+          if (giteeRepo.trim()) body.giteeRepo = giteeRepo.trim()
           await callJson('', '/dsh-pair/config', { method: 'POST', body: JSON.stringify(body) })
           setSaved(true)
           setSecret('')
@@ -657,6 +659,19 @@ window.__ModuleLoader__.load({
           })),
         h('div', { className: 'pair-hint', style: { marginTop: 6 } },
           '电脑端自带专用隧道，一般不用填密码。'),
+
+        h('label', { className: 'pair-label' }, 'Gitee 仓库（可选）'),
+        h('div', { className: 'pair-field' },
+          h('input', {
+            value: giteeRepo,
+            placeholder: 'twinklem/dsh-pair-link',
+            autoCapitalize: 'off',
+            autoCorrect: 'off',
+            spellCheck: false,
+            onChange: (e) => setGiteeRepo(e.target.value),
+          })),
+        h('div', { className: 'pair-hint', style: { marginTop: 6 } },
+          '填了就和 GitHub 一起作为地址来源，手机端会两处都试。'),
 
         h('label', { className: 'pair-label' }, '桥接令牌（可选）'),
         h('div', { className: 'pair-field' },
@@ -1762,7 +1777,7 @@ window.__ModuleLoader__.load({
                 },
               },
               h('div', null, treeError),
-              h(SyncEndpointButton, { onSynced: refreshNow }))
+              h('div', { className: 'pair-hint' }, '点右上角「刷新」会先同步 GitHub/Gitee 上的最新地址。'))
               : null,
             h('div', {
               style: {
