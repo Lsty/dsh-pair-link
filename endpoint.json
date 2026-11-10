@@ -1,7 +1,7 @@
 {
   "device": "Ma",
-  "url": "https://ntsc-archive-relocation-triangle.trycloudflare.com",
-  "ts": 1794321191539,
+  "url": "https://modern-written-tiles-bee.trycloudflare.com",
+  "ts": 1794321454407,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "zxNm4LQdgVoTpookn1f+0yrqf9HksjHhnIbsvHoCawVzhBJdDBcVQfaRRrnzfeBkaycB3Ab6gqkZI9GNuontDQ=="
+  "sig": "q8ASqZfK5VyNAQBC/9kS8EC8Sv42xA+WzjKeOkgbixwjam0wE/wak43z+5JGipQGpaH2AGOx2OlUt47cSSeBCw=="
 }
