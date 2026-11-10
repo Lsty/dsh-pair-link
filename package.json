@@ -1,27 +1,31 @@
 {
   "name": "dsh-pair-link",
-  "version": "0.2.0",
-  "description": "PC 与手机 DSH 配对互联：实时对话流与审批同步（零依赖，host/client 双模式）",
+  "version": "0.3.0",
+  "description": "用手机上的第三方 DSH 远程控制电脑 DSH 会话：左侧栏「远程电脑」入口，看会话、读消息、发消息、审批（零依赖，host/client 双模式）",
   "type": "module",
   "main": "index.js",
   "license": "MIT",
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
     "./package.json": "./package.json"
   },
   "files": [
     "index.js",
     "client.js",
     "cordis.patch.yml",
-    "README.md",
-    "icon.svg"
+    "locale/*.json",
+    "icon.svg",
+    "README.md"
   ],
   "keywords": [
     "deepseek-harness",
     "dsh",
     "dsh-plugin",
     "remote",
+    "remote-control",
     "pairing",
     "websocket",
     "approval"
