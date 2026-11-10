@@ -1,7 +1,7 @@
 {
   "device": "Ma",
-  "url": "https://virginia-packard-many-reach.trycloudflare.com",
-  "ts": 1794323029633,
+  "url": "http://127.0.0.1:52716",
+  "ts": 1794323111689,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "8p4b+eq3q1DdQwyB3gM5KOlwAJGphI+0Bi99fGxFVP3+DyAtB0Axm4WEsKuj1/qKMpVDAiebUZdjVCKnDV4FAw=="
+  "sig": "qHfpf7s5Pvnt/+1aDbhu6mxVWBDX/G+GRsPWjqZpk7qewivVRVDKYJGfn0+9a4dhROKSM+cFGOo5bpGzq4JXDg=="
 }
