@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.12'
+const VERSION = '0.4.13'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -2362,10 +2362,25 @@ function normalizeQuestions(list) {
     }))
 }
 
+/**
+ * 插件刚重载时手机还在重连，这段窗口里审批/提问别急着交回原生，
+ * 等最多几秒让客户端回来，否则手机端整条请求都看不到。
+ */
+async function waitForClients(runtime, timeoutMs) {
+  if (runtime.clients.size > 0) return true
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (runtime.stopped) return false
+    if (runtime.clients.size > 0) return true
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  return runtime.clients.size > 0
+}
+
 function applyQuestionBridge(ctx, runtime) {
   const handler = async (request, next) => {
     if (runtime.stopped) return next()
-    if (runtime.clients.size === 0) return next()
+    if (runtime.clients.size === 0 && !(await waitForClients(runtime, 6_000))) return next()
     const questions = normalizeQuestions(request?.questions)
     if (questions.length === 0) return next()
 
@@ -2435,7 +2450,7 @@ function applyApprovalBridge(ctx, runtime) {
     if (runtime.stopped) return next()
     probe(`FIRED tool=${request?.toolName ?? '?'} clients=${runtime.clients.size}`)
     try {
-      if (runtime.clients.size === 0) return next()
+      if (runtime.clients.size === 0 && !(await waitForClients(runtime, 6_000))) return next()
       runtime.approvalsSeen += 1
       const id = randomUUID()
       const info = {
