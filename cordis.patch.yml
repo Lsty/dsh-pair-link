@@ -1,0 +1,4 @@
+# dsh-pair-link bundle patch
+- insert:
+    - id: dsh-pair-link
+      name: 'dsh-pair-link'
