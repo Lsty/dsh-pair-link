@@ -1,7 +1,7 @@
 {
   "device": "Ma",
   "url": "https://scientific-crimes-proceeds-arrangement.trycloudflare.com",
-  "ts": 1794329492269,
+  "ts": 1794329759026,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "f6ly2v7VpCsCpdE4y6XM8uruhD2PkFAhY8289ep44EKv65uZcvIZT6+M6WNa2nJDsTT+w+bs+WgPJKek8o0DCQ=="
+  "sig": "nGWypEzD7zBfHXgTHSy/AGYoADExXJs71THLm6/Q+mMobVruITcO0SjIuhrwdmPlMQIgo6lt0K9WawkTEQK3Cg=="
 }
