@@ -12,12 +12,15 @@ window.__ModuleLoader__.load({
       const [items, setItems] = React.useState([])
       const [busy, setBusy] = React.useState(null)
 
+      const token = typeof window !== 'undefined' ? window.__DSH_PAIR_TOKEN__ : ''
+      const authHeaders = token ? { 'x-pair-token': token } : {}
+
       React.useEffect(() => {
         let alive = true
         let timer = null
         const tick = async () => {
           try {
-            const res = await fetch('/dsh-pair/inbox', { cache: 'no-store' })
+            const res = await fetch('/dsh-pair/inbox', { cache: 'no-store', headers: authHeaders })
             const json = await res.json()
             if (alive) setItems(Array.isArray(json?.approvals) ? json.approvals : [])
           } catch {
@@ -34,7 +37,7 @@ window.__ModuleLoader__.load({
         try {
           await fetch('/dsh-pair/decide', {
             method: 'POST',
-            headers: { 'content-type': 'application/json' },
+            headers: { 'content-type': 'application/json', ...authHeaders },
             body: JSON.stringify({ id, outcome }),
           })
           setItems((prev) => prev.filter((x) => x.id !== id))
