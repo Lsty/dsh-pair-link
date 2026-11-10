@@ -120,7 +120,7 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 服务端 → 客户端：
 
 ```jsonc
-{ "type": "hello", "role": "host", "version": "0.3.0" }
+{ "type": "hello", "role": "host", "version": "0.4.0" }
 { "type": "approval", "id": "uuid", "toolName": "pwsh", "reason": "...", "sessionId": "..." }
 { "type": "approval-resolved", "id": "uuid", "outcome": "allowed-once" }
 { "type": "approval-delegated", "id": "uuid", "reason": "timeout-or-abort" }
@@ -131,6 +131,18 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 ```jsonc
 { "type": "approval-decision", "id": "uuid", "outcome": "allowed-once" }
 ```
+
+## 从电脑更新（不用 GitHub）
+
+连上之后，手机端可以**直接从电脑拉新版本**，绕开 GitHub：
+
+- 电脑端 `GET /dsh-pair/pkg/manifest` 返回版本 + 7 个文件的 sha256
+- 电脑端 `GET /dsh-pair/pkg/file?path=…` 返回文件（只认白名单里的 7 个路径，路径穿越返回 404）
+- 手机端「远程电脑」面板顶部显示 `电脑 0.4.0 · 本机 0.3.0` 和「从电脑更新」按钮
+- 点更新：手机端逐个下载 → 校验 sha256（有一个不对就整批放弃）→ 备份到包目录 `.backup-<时间戳>/` → 覆盖文件
+- 提示「重启 DSH 后生效」
+
+只认本机页面令牌，远程密钥不能触发（避免远程覆盖手机代码）。
 
 ## 已知限制
 

@@ -1,9 +1,12 @@
 // dsh-pair-link —— 手机端页面
 //
 //  · 左侧栏（sidebar.panellist）一个「远程电脑」入口
-//  · 主面板（main）里显示电脑上的会话列表、对话内容，可直接发消息 / 停止
-//  · shell.overlay 里保留审批浮层（来自电脑的 approval 请求）
-//  · settings.section 保留「DSH 配对」状态页
+//  · 主面板：左边工作区树（工作区 → 会话），右边对话；窄屏时两级切换
+//  · 对话里带模型选择、运行范围（权限预设）、思考过程、工具调用折叠
+//  · shell.overlay 里保留审批浮层；settings.section 保留状态页
+//
+//  样式按 DSH 原生 primitives 的规格抄（按钮 36/28、列表项 34、输入框 36），
+//  只用主题 token；类名统一加 pair- 前缀，避免和宿主样式互相影响。
 
 window.__ModuleLoader__.load({
   id: 'dsh-pair-link',
@@ -12,6 +15,260 @@ window.__ModuleLoader__.load({
     const h = React.createElement
 
     const PANEL_ID = 'dsh-pair-link'
+
+    // -----------------------------------------------------------------------
+    // 原生规格的局部样式（抄自客户端 primitives 的 CSS Modules）
+    // -----------------------------------------------------------------------
+    const CSS_TEXT = `
+.pair-btn {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+  background: transparent;
+  padding: 0 14px;
+  height: 36px;
+  flex: 0 0 auto;
+  -webkit-tap-highlight-color: transparent;
+}
+.pair-btn:disabled { cursor: not-allowed; opacity: .4; }
+.pair-btn--sm { height: 28px; font-size: 12px; line-height: 18px; padding: 0 10px; border-radius: var(--dsw-radius-sm); }
+.pair-btn--primary { background: var(--dsw-alias-button-primary-fill); color: var(--dsw-alias-label-primary-foreground); }
+.pair-btn--primary:hover:not(:disabled) { background: var(--dsw-alias-button-primary-hover); }
+.pair-btn--ghost:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-btn--ghost:active:not(:disabled) { background: var(--dsw-alias-interactive-bg-active); }
+.pair-btn--outline { box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l3); }
+.pair-btn--outline:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-btn--danger { color: var(--dsw-alias-state-error-primary); }
+.pair-btn--danger:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover-danger); }
+
+.pair-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+}
+.pair-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-row[data-active="true"] { background: var(--dsw-alias-interactive-bg-active); }
+.pair-row-title { font-size: 13px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair-row-meta { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pair-chevron { color: var(--dsw-alias-label-tertiary); font-size: 15px; flex: 0 0 auto; }
+
+.pair-ws {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  border-radius: var(--dsw-radius-md);
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: 600;
+  color: var(--dsw-alias-label-secondary);
+  text-align: left;
+}
+.pair-ws:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-ws-caret { display: inline-block; width: 12px; color: var(--dsw-alias-label-tertiary); }
+.pair-ws-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair-ws-count { font-size: 11px; color: var(--dsw-alias-label-tertiary); font-weight: 400; }
+.pair-ws-sessions { display: flex; flex-direction: column; gap: 0; margin-left: 10px; border-left: .5px solid var(--dsw-alias-border-l1); padding-left: 6px; }
+
+.pair-card {
+  background: var(--dsw-alias-bg-layer-1);
+  border: .5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-lg);
+  padding: 14px 16px;
+}
+
+.pair-field {
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  padding: 0 10px;
+  border: .5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+}
+.pair-field:focus-within { border-color: var(--dsw-alias-state-business-primary); }
+.pair-field input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  color: var(--dsw-alias-label-primary);
+}
+.pair-field input::placeholder { color: var(--dsw-alias-label-dimmed); }
+
+.pair-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  resize: none;
+  border: .5px solid var(--dsw-alias-border-l4);
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-1);
+  color: var(--dsw-alias-label-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 22px;
+  padding: 8px 10px;
+  outline: none;
+  min-height: 44px;
+}
+.pair-textarea:focus { border-color: var(--dsw-alias-state-business-primary); }
+.pair-textarea::placeholder { color: var(--dsw-alias-label-dimmed); }
+
+.pair-label { display: block; font-size: 12px; line-height: 18px; margin: 12px 0 6px; color: var(--dsw-alias-label-secondary); }
+.pair-hint { font-size: 11.5px; line-height: 1.65; color: var(--dsw-alias-label-secondary); }
+.pair-error { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-state-error-primary); }
+.pair-ok { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-state-success-primary); }
+
+.pair-menu-anchor { position: relative; display: inline-flex; }
+.pair-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 60;
+  min-width: 180px;
+  max-width: min(320px, 86vw);
+  max-height: 52vh;
+  overflow-y: auto;
+  box-sizing: border-box;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--dsw-alias-bg-overlay);
+  border: .5px solid var(--dsw-alias-border-l1);
+  border-radius: var(--dsw-radius-md);
+  box-shadow: 0 8px 24px rgba(0,0,0,.28);
+}
+.pair-menu-title { font-size: 11px; line-height: 16px; padding: 6px 8px 2px; color: var(--dsw-alias-label-tertiary); }
+.pair-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 34px;
+  padding: 6px 8px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--dsw-alias-label-primary);
+  text-align: left;
+}
+.pair-menu-item:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-menu-item[data-active="true"] { background: var(--dsw-alias-interactive-bg-active); }
+.pair-menu-item small { display: block; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); font-weight: 400; }
+.pair-menu-check { width: 14px; color: var(--dsw-alias-state-business-primary); flex: 0 0 auto; }
+
+.pair-reasoning {
+  margin: 2px 0 4px;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 12px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 42vh;
+  overflow-y: auto;
+}
+.pair-reasoning-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 1px 0;
+  padding: 2px 6px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+.pair-reasoning-toggle:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
+.pair-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  padding: 2px 0;
+}
+.pair-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 46vw;
+  height: 26px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-secondary);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.pair-tool:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-tool-caret { font-size: 9px; color: var(--dsw-alias-label-tertiary); }
+
+@media (min-width: 760px) {
+  .pair-panes { display: flex; gap: 14px; flex: 1; min-height: 0; }
+  .pair-tree-pane { width: 272px; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+  .pair-detail-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+}
+@media (max-width: 759px) {
+  .pair-panes { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  .pair-tree-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
+  .pair-detail-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+}
+`
+
+    function StyleSheet() {
+      return h('style', { dangerouslySetInnerHTML: { __html: CSS_TEXT } })
+    }
 
     // -----------------------------------------------------------------------
     // 基础
@@ -64,6 +321,19 @@ window.__ModuleLoader__.load({
       return parts[parts.length - 1] || text
     }
 
+    function useNarrow() {
+      const [narrow, setNarrow] = React.useState(false)
+      React.useEffect(() => {
+        if (typeof window === 'undefined' || !window.matchMedia) return undefined
+        const mq = window.matchMedia('(max-width: 759px)')
+        const update = () => setNarrow(Boolean(mq.matches))
+        update()
+        if (mq.addEventListener) mq.addEventListener('change', update)
+        return () => { if (mq.removeEventListener) mq.removeEventListener('change', update) }
+      }, [])
+      return narrow
+    }
+
     // -----------------------------------------------------------------------
     // 侧栏图标
     // -----------------------------------------------------------------------
@@ -111,49 +381,46 @@ window.__ModuleLoader__.load({
     }
 
     function Card({ children, style }) {
-      return h('div', {
-        style: {
-          background: 'var(--dsw-alias-bg-layer-1)',
-          border: '1px solid var(--dsw-alias-border-l1)',
-          borderRadius: 12,
-          padding: 14,
-          ...style,
-        },
-      }, children)
+      return h('div', { className: 'pair-card', style }, children)
     }
 
-    function Button({ children, onClick, kind = 'ghost', disabled = false, style, title }) {
-      const palette = kind === 'primary'
-        ? { background: 'var(--dsw-alias-brand-primary)', color: '#fff', border: '1px solid transparent' }
-        : kind === 'danger'
-          ? { background: 'transparent', color: 'var(--dsw-alias-state-error-primary)', border: '1px solid var(--dsw-alias-state-error-primary)' }
-          : { background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-label-primary)', border: '1px solid var(--dsw-alias-border-l1)' }
+    function Button({ children, onClick, kind = 'ghost', size = 'md', disabled = false, style, title }) {
+      const cls = ['pair-btn', kind !== 'ghost' ? `pair-btn--${kind}` : '', size === 'sm' ? 'pair-btn--sm' : '']
+        .filter(Boolean)
+        .join(' ')
       return h('button', {
         type: 'button',
         title,
         onClick,
         disabled,
-        style: {
-          ...palette,
-          borderRadius: 9,
-          padding: '8px 13px',
-          fontSize: 13,
-          fontWeight: 600,
-          cursor: disabled ? 'default' : 'pointer',
-          opacity: disabled ? 0.55 : 1,
-          lineHeight: 1.35,
-          ...style,
-        },
+        className: cls,
+        style,
       }, children)
     }
 
     function Empty({ children }) {
       return h('div', {
         style: {
-          padding: '22px 12px', textAlign: 'center', fontSize: 13,
-          color: 'var(--dsw-alias-label-secondary)',
+          padding: '24px 12px', textAlign: 'center', fontSize: 12,
+          color: 'var(--dsw-alias-label-tertiary)',
         },
       }, children)
+    }
+
+    /** 点外面关掉的浮层菜单。 */
+    function PopMenu({ open, onClose, children, style }) {
+      const ref = React.useRef(null)
+      React.useEffect(() => {
+        if (!open) return undefined
+        const onDown = (event) => {
+          const node = ref.current
+          if (node && event.target instanceof Node && !node.contains(event.target)) onClose()
+        }
+        document.addEventListener('pointerdown', onDown, true)
+        return () => document.removeEventListener('pointerdown', onDown, true)
+      }, [open, onClose])
+      if (!open) return null
+      return h('div', { ref, className: 'pair-menu', style }, children)
     }
 
     // -----------------------------------------------------------------------
@@ -167,22 +434,6 @@ window.__ModuleLoader__.load({
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
       const [saved, setSaved] = React.useState(false)
-
-      const inputStyle = {
-        width: '100%',
-        boxSizing: 'border-box',
-        padding: '9px 10px',
-        borderRadius: 8,
-        border: '1px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsw-alias-bg-base)',
-        color: 'var(--dsw-alias-label-primary)',
-        fontSize: 13,
-        fontFamily: 'inherit',
-      }
-      const labelStyle = {
-        display: 'block', fontSize: 12, margin: '10px 0 5px',
-        color: 'var(--dsw-alias-label-secondary)',
-      }
 
       const save = async () => {
         setBusy(true)
@@ -205,122 +456,293 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return h(Card, { style: { display: 'flex', flexDirection: 'column', gap: 2 } },
-        h('div', { style: { fontWeight: 700, fontSize: 14, marginBottom: 2 } }, '连接这台电脑'),
-        h('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } },
-          '填电脑上 DSH 的公网地址（隧道域名）和配对密钥；两者与电脑端 dsh-pair-link.json 里的一致。'),
+      return h(Card, { style: { display: 'flex', flexDirection: 'column' } },
+        h('div', { style: { fontSize: 14, lineHeight: '22px', fontWeight: 600 } }, '连接这台电脑'),
+        h('div', { className: 'pair-hint', style: { marginTop: 4 } },
+          '填电脑上「远程电脑」面板顶部显示的公网地址和配对密钥。'),
 
-        h('label', { style: labelStyle }, '电脑地址'),
-        h('input', {
-          style: inputStyle,
-          value: pairUrl,
-          placeholder: 'https://xxxx.trycloudflare.com',
-          autoCapitalize: 'off',
-          autoCorrect: 'off',
-          spellCheck: false,
-          onChange: (e) => setPairUrl(e.target.value),
-        }),
+        h('label', { className: 'pair-label' }, '电脑地址'),
+        h('div', { className: 'pair-field' },
+          h('input', {
+            value: pairUrl,
+            placeholder: 'https://xxxx.trycloudflare.com',
+            autoCapitalize: 'off',
+            autoCorrect: 'off',
+            spellCheck: false,
+            onChange: (e) => setPairUrl(e.target.value),
+          })),
 
-        h('label', { style: labelStyle }, '配对密钥'),
-        h('input', {
-          style: inputStyle,
-          value: secret,
-          type: 'password',
-          placeholder: info && info.hasSecret ? '已保存，留空表示不修改' : '电脑端 secret',
-          autoCapitalize: 'off',
-          autoCorrect: 'off',
-          spellCheck: false,
-          onChange: (e) => setSecret(e.target.value),
-        }),
+        h('label', { className: 'pair-label' }, '配对密钥'),
+        h('div', { className: 'pair-field' },
+          h('input', {
+            value: secret,
+            type: 'password',
+            placeholder: info && info.hasSecret ? '已保存，留空表示不修改' : '电脑端 secret',
+            autoCapitalize: 'off',
+            autoCorrect: 'off',
+            spellCheck: false,
+            onChange: (e) => setSecret(e.target.value),
+          })),
 
-        h('label', { style: labelStyle }, '桥接令牌（可选）'),
-        h('input', {
-          style: inputStyle,
-          value: bridgeToken,
-          type: 'password',
-          placeholder: '电脑前面的 dsh-bridge 免密令牌',
-          autoCapitalize: 'off',
-          autoCorrect: 'off',
-          spellCheck: false,
-          onChange: (e) => setBridgeToken(e.target.value),
-        }),
+        h('label', { className: 'pair-label' }, '访问密码（可选）'),
+        h('div', { className: 'pair-field' },
+          h('input', {
+            value: bridgePassword,
+            type: 'password',
+            placeholder: info && info.hasBridgePassword ? '已保存，留空表示不修改' : '只有电脑前面有登录墙时才需要',
+            autoCapitalize: 'off',
+            autoCorrect: 'off',
+            spellCheck: false,
+            onChange: (e) => setBridgePassword(e.target.value),
+          })),
+        h('div', { className: 'pair-hint', style: { marginTop: 6 } },
+          '电脑端自带专用隧道，一般不用填密码。'),
 
-        h('label', { style: labelStyle }, '访问密码（可选）'),
-        h('input', {
-          style: inputStyle,
-          value: bridgePassword,
-          type: 'password',
-          placeholder: info && info.hasBridgePassword ? '已保存，留空表示不修改' : '电脑前面那个远程访问插件的访问密码',
-          autoCapitalize: 'off',
-          autoCorrect: 'off',
-          spellCheck: false,
-          onChange: (e) => setBridgePassword(e.target.value),
-        }),
-        h('div', { style: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6, marginTop: 4 } },
-          '电脑如果开了 dsh-bridge 之类的外网访问插件，填它的访问密码即可，插件会在手机端自己登录换会话。密码只写在这台手机的 ~/.dsh/dsh-pair-link.json。'),
+        h('label', { className: 'pair-label' }, '桥接令牌（可选）'),
+        h('div', { className: 'pair-field' },
+          h('input', {
+            value: bridgeToken,
+            type: 'password',
+            placeholder: '远程访问插件的免密令牌',
+            autoCapitalize: 'off',
+            autoCorrect: 'off',
+            spellCheck: false,
+            onChange: (e) => setBridgeToken(e.target.value),
+          })),
 
-        error ? h('div', { style: { marginTop: 10, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } }, error) : null,
-        saved ? h('div', { style: { marginTop: 10, fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' } }, '已保存并生效') : null,
+        error ? h('div', { className: 'pair-error', style: { marginTop: 10 } }, error) : null,
+        saved ? h('div', { className: 'pair-ok', style: { marginTop: 10 } }, '已保存并生效') : null,
 
-        h('div', { style: { display: 'flex', gap: 8, marginTop: 14 } },
+        h('div', { style: { display: 'flex', gap: 8, marginTop: 16 } },
           h(Button, { kind: 'primary', onClick: save, disabled: busy }, busy ? '保存中…' : '保存并连接'),
           info && info.host
-            ? h(Button, { onClick: () => { setPairUrl(''); setSecret(''); setBridgeToken(''); setBridgePassword('') } }, '清空输入')
+            ? h(Button, {
+              kind: 'outline',
+              onClick: () => { setPairUrl(''); setSecret(''); setBridgeToken(''); setBridgePassword('') },
+            }, '清空')
             : null))
     }
 
     // -----------------------------------------------------------------------
-    // 会话列表
+    // 工作区 / 会话树
     // -----------------------------------------------------------------------
     function SessionRow({ session, active, onOpen }) {
-      const title = session.title && session.title.trim() ? session.title : `未命名 · ${basename(session.cwd) || '会话'}`
+      const title = session.title && session.title.trim()
+        ? session.title
+        : `未命名 · ${basename(session.cwd) || '会话'}`
       return h('button', {
         type: 'button',
+        className: 'pair-row',
+        'data-active': active ? 'true' : 'false',
         onClick: () => onOpen(session.id),
+      },
+      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+          session.running ? h(Dot, { tone: 'ok' }) : null,
+          h('span', { className: 'pair-row-title' }, title)),
+        h('div', { className: 'pair-row-meta' },
+          h('span', null, formatWhen(session.updatedAt)),
+          session.cwd
+            ? h('span', {
+              style: {
+                overflow: 'hidden', textOverflow: 'ellipsis',
+                maxWidth: 150, whiteSpace: 'nowrap',
+              },
+            }, basename(session.cwd))
+            : null)),
+      active ? h('span', { style: { color: 'var(--dsw-alias-state-business-primary)', fontSize: 13 } }, '•') : null)
+    }
+
+    function WorkspaceTree({ tree, activeId, onOpen, collapsed, onToggle }) {
+      if (!tree) return h(Empty, null, '正在读取工作区…')
+      const workspaces = tree.workspaces || []
+      const others = tree.others || []
+
+      const group = (key, label, sessions, collapsible, collapsedNow, toggle) => {
+        if (!sessions.length) return null
+        return h('div', { key },
+          collapsible
+            ? h('button', {
+              type: 'button',
+              className: 'pair-ws',
+              onClick: toggle,
+            },
+            h('span', { className: 'pair-ws-caret' }, collapsedNow ? '›' : '⌄'),
+            h('span', { className: 'pair-ws-title' }, label),
+            h('span', { className: 'pair-ws-count' }, String(sessions.length)))
+            : h('div', { className: 'pair-ws', style: { cursor: 'default' } },
+              h('span', { className: 'pair-ws-caret' }),
+              h('span', { className: 'pair-ws-title' }, label),
+              h('span', { className: 'pair-ws-count' }, String(sessions.length))),
+          collapsedNow
+            ? null
+            : h('div', { className: 'pair-ws-sessions' },
+              sessions.map((session) => h(SessionRow, {
+                key: session.id,
+                session,
+                active: session.id === activeId,
+                onOpen,
+              }))))
+      }
+
+      return h('div', {
         style: {
-          display: 'flex', alignItems: 'center', gap: 10, width: '100%',
-          textAlign: 'left', padding: '11px 12px', borderRadius: 10,
-          border: active ? '1px solid var(--dsw-alias-brand-primary)' : '1px solid var(--dsw-alias-border-l1)',
-          background: active ? 'var(--dsw-alias-bg-layer-2)' : 'var(--dsw-alias-bg-layer-1)',
-          color: 'var(--dsw-alias-label-primary)', cursor: 'pointer',
-          font: 'inherit',
+          display: 'flex', flexDirection: 'column', gap: 2,
+          overflowY: 'auto', flex: 1, minHeight: 120, paddingRight: 2,
         },
       },
-      h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, flex: 1, minWidth: 0 } },
-        h('div', {
-          style: {
-            fontSize: 13.5, fontWeight: 600, overflow: 'hidden',
-            textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          },
-        }, title),
-        h('div', {
-          style: {
-            fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)',
-            display: 'flex', gap: 8, flexWrap: 'wrap',
-          },
+      workspaces.map((workspace) => group(
+        workspace.id,
+        workspace.title || basename(workspace.path),
+        workspace.sessions,
+        true,
+        collapsed.has(workspace.id),
+        () => onToggle(workspace.id),
+      )),
+      group(
+        '__others__',
+        '其他会话',
+        others,
+        true,
+        collapsed.has('__others__'),
+        () => onToggle('__others__'),
+      ))
+    }
+
+    // -----------------------------------------------------------------------
+    // 模型 / 权限选择
+    // -----------------------------------------------------------------------
+    function ModelPicker({ meta, onPick, disabled }) {
+      const [open, setOpen] = React.useState(false)
+      const current = meta && meta.model ? meta.model : null
+      const models = meta && meta.models ? meta.models : null
+      const label = current
+        ? `${current.model}${current.reasoningEffort ? ` · ${current.reasoningEffort}` : ''}`
+        : '模型'
+
+      const groups = models && Array.isArray(models.groups) ? models.groups : []
+      const options = []
+      for (const group of groups) {
+        for (const model of group.models ?? []) {
+          const efforts = model.reasoning && Array.isArray(model.reasoning.efforts) ? model.reasoning.efforts : []
+          if (efforts.length > 1) {
+            for (const effort of efforts) {
+              options.push({
+                key: `${group.id}/${model.id}/${effort.id}`,
+                group: group.name || group.id,
+                provider: group.id,
+                model,
+                effort: effort.id,
+                label: model.name || model.id,
+                sub: `${effort.name || effort.id}`,
+              })
+            }
+          } else {
+            options.push({
+              key: `${group.id}/${model.id}`,
+              group: group.name || group.id,
+              provider: group.id,
+              model,
+              effort: efforts[0] ? efforts[0].id : null,
+              label: model.name || model.id,
+              sub: model.description || '',
+            })
+          }
+        }
+      }
+
+      const activeKey = current
+        ? options.find((option) => option.model.id === current.model && (option.effort ?? null) === current.reasoningEffort)
+        : null
+
+      const items = options.map((option) => h('button', {
+        key: option.key,
+        type: 'button',
+        className: 'pair-menu-item',
+        'data-active': activeKey && activeKey.key === option.key ? 'true' : 'false',
+        onClick: () => { setOpen(false); onPick(option) },
+      },
+      h('span', { className: 'pair-menu-check' }, activeKey && activeKey.key === option.key ? '✓' : ''),
+      h('span', { style: { flex: 1, minWidth: 0 } },
+        h('span', null, option.label),
+        h('small', null, option.sub ? `${option.group} · ${option.sub}` : option.group))))
+
+      return h('div', { className: 'pair-menu-anchor' },
+        h('button', {
+          type: 'button',
+          className: 'pair-tool',
+          disabled,
+          onClick: () => setOpen((value) => !value),
+          title: '模型',
         },
-        session.running
-          ? h('span', { style: { color: 'var(--dsw-alias-state-success-primary)', display: 'inline-flex', alignItems: 'center', gap: 4 } },
-            h(Dot, { tone: 'ok' }), '运行中')
-          : null,
-        h('span', null, formatWhen(session.updatedAt)),
-        session.cwd ? h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 150, whiteSpace: 'nowrap' } }, basename(session.cwd)) : null)),
-      h('span', {
-        'aria-hidden': true,
-        style: { color: 'var(--dsw-alias-label-secondary)', fontSize: 16, flex: '0 0 auto' },
-      }, '›'))
+        h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, label),
+        h('span', { className: 'pair-tool-caret' }, '▾')),
+        h(PopMenu, { open, onClose: () => setOpen(false) },
+          h('div', { className: 'pair-menu-title' }, '模型'),
+          options.length === 0
+            ? h('div', { className: 'pair-hint', style: { padding: '6px 8px' } }, '没有可切换的模型')
+            : items))
+    }
+
+    function PermissionPicker({ meta, onPick, disabled }) {
+      const [open, setOpen] = React.useState(false)
+      const permission = meta && meta.permission ? meta.permission : null
+      const options = permission && Array.isArray(permission.options) ? permission.options : []
+      const current = permission && permission.current ? permission.current : ''
+      const currentOption = options.find((option) => option.value === current)
+
+      return h('div', { className: 'pair-menu-anchor' },
+        h('button', {
+          type: 'button',
+          className: 'pair-tool',
+          disabled: disabled || options.length === 0,
+          onClick: () => setOpen((value) => !value),
+          title: '运行范围',
+        },
+        h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } },
+          currentOption ? (currentOption.name || currentOption.value) : (current || '范围')),
+        h('span', { className: 'pair-tool-caret' }, '▾')),
+        h(PopMenu, { open, onClose: () => setOpen(false) },
+          h('div', { className: 'pair-menu-title' }, '运行范围'),
+          options.map((option) => h('button', {
+            key: option.value,
+            type: 'button',
+            className: 'pair-menu-item',
+            'data-active': option.value === current ? 'true' : 'false',
+            onClick: () => {
+              setOpen(false)
+              onPick(option.value)
+            },
+          },
+          h('span', { className: 'pair-menu-check' }, option.value === current ? '✓' : ''),
+          h('span', { style: { flex: 1, minWidth: 0 } },
+            h('span', null, option.name || option.value),
+            option.description ? h('small', null, option.description) : null)))))
     }
 
     // -----------------------------------------------------------------------
     // 对话详情
     // -----------------------------------------------------------------------
+    function Reasoning({ text }) {
+      const [open, setOpen] = React.useState(false)
+      if (!text) return null
+      return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 } },
+        h('button', {
+          type: 'button',
+          className: 'pair-reasoning-toggle',
+          onClick: () => setOpen((value) => !value),
+        }, (open ? '⌄' : '›') + ' 思考过程'),
+        open ? h('div', { className: 'pair-reasoning' }, text) : null)
+    }
+
     function MessageBubble({ message }) {
       const role = message.role
       if (role === 'system') {
         return h('div', {
           style: {
-            alignSelf: 'center', fontSize: 11.5, padding: '3px 9px', borderRadius: 999,
-            color: 'var(--dsw-alias-label-secondary)', background: 'var(--dsw-alias-bg-layer-2)',
+            alignSelf: 'center', fontSize: 11, padding: '3px 9px', borderRadius: 999,
+            color: 'var(--dsw-alias-label-tertiary)',
+            background: 'var(--dsw-alias-bg-layer-2)',
             maxWidth: '90%', textAlign: 'center',
           },
         }, message.text)
@@ -328,10 +750,10 @@ window.__ModuleLoader__.load({
       if (role === 'tool') {
         return h('div', {
           style: {
-            fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', padding: '2px 4px',
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', padding: '1px 4px',
+            fontFamily: 'var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace)',
           },
-        }, '🔧 ' + message.text)
+        }, message.text)
       }
       const mine = role === 'user'
       return h('div', {
@@ -343,31 +765,33 @@ window.__ModuleLoader__.load({
           gap: 3,
         },
       },
+      mine ? null : h(Reasoning, { text: message.reasoning }),
+      message.text
+        ? h('div', {
+          style: {
+            padding: '8px 12px',
+            borderRadius: 'var(--dsw-radius-lg)',
+            background: mine ? 'var(--dsw-alias-button-primary-fill)' : 'var(--dsw-alias-bg-layer-1)',
+            color: mine ? 'var(--dsw-alias-label-primary-foreground)' : 'var(--dsw-alias-label-primary)',
+            boxShadow: mine ? 'none' : 'inset 0 0 0 .5px var(--dsw-alias-border-l1)',
+            fontSize: 13,
+            lineHeight: 1.55,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          },
+        }, message.text)
+        : null,
       h('div', {
         style: {
-          padding: '9px 12px',
-          borderRadius: 12,
-          borderTopRightRadius: mine ? 4 : 12,
-          borderTopLeftRadius: mine ? 12 : 4,
-          background: mine ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-bg-layer-1)',
-          color: mine ? '#fff' : 'var(--dsw-alias-label-primary)',
-          border: mine ? '1px solid transparent' : '1px solid var(--dsw-alias-border-l1)',
-          fontSize: 13.5,
-          lineHeight: 1.55,
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-        },
-      }, message.text),
-      h('div', {
-        style: {
-          fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)',
+          fontSize: 10, color: 'var(--dsw-alias-label-tertiary)',
           textAlign: mine ? 'right' : 'left', padding: '0 2px',
         },
       }, formatClock(message.time)))
     }
 
-    function SessionDetail({ base, session, onBack, onChanged }) {
+    function SessionDetail({ base, session, onBack, onChanged, narrow }) {
       const [messages, setMessages] = React.useState([])
+      const [meta, setMeta] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [draft, setDraft] = React.useState('')
       const [sending, setSending] = React.useState(false)
@@ -387,6 +811,13 @@ window.__ModuleLoader__.load({
         }
       }, [base, session.id])
 
+      const loadMeta = React.useCallback(async () => {
+        try {
+          const body = await callJson(base, `/sessions/${encodeURIComponent(session.id)}/meta`)
+          setMeta(body)
+        } catch { /* 元信息失败不挡消息 */ }
+      }, [base, session.id])
+
       React.useEffect(() => {
         let alive = true
         let timer = null
@@ -400,10 +831,44 @@ window.__ModuleLoader__.load({
       }, [load])
 
       React.useEffect(() => {
+        loadMeta()
+        const timer = setInterval(loadMeta, 10_000)
+        return () => clearInterval(timer)
+      }, [loadMeta])
+
+      React.useEffect(() => {
         const node = scrollRef.current
         if (!node || !stickToBottom.current) return
         node.scrollTop = node.scrollHeight
       }, [messages])
+
+      const pickModel = async (option) => {
+        try {
+          await callJson(base, `/sessions/${encodeURIComponent(session.id)}/model`, {
+            method: 'POST',
+            body: JSON.stringify({
+              provider: option.provider,
+              model: option.model.id,
+              ...(option.effort ? { reasoningEffort: option.effort } : {}),
+            }),
+          })
+          await loadMeta()
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      const pickPermission = async (name) => {
+        try {
+          await callJson(base, `/sessions/${encodeURIComponent(session.id)}/permission`, {
+            method: 'POST',
+            body: JSON.stringify({ name }),
+          })
+          await loadMeta()
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        }
+      }
 
       const send = async () => {
         const text = draft.trim()
@@ -432,7 +897,7 @@ window.__ModuleLoader__.load({
             method: 'POST',
             body: '{}',
           })
-          await load()
+          await Promise.all([load(), loadMeta()])
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
         }
@@ -444,46 +909,58 @@ window.__ModuleLoader__.load({
         stickToBottom.current = node.scrollHeight - node.scrollTop - node.clientHeight < 48
       }
 
-      return h('div', { style: { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, gap: 10 } },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-          h(Button, { onClick: onBack, title: '返回会话列表' }, '‹ 返回'),
-          h('div', {
-            style: {
-              flex: 1, minWidth: 0, fontWeight: 700, fontSize: 14,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            },
-          }, session.title && session.title.trim() ? session.title : '未命名会话'),
-          session.running
-            ? h(Button, { kind: 'danger', onClick: stop, title: '停止这一轮' }, '停止')
-            : null,
-          h(Button, {
-            onClick: () => setShowTools((value) => !value),
-            title: '显示 / 隐藏工具调用',
-            style: { padding: '6px 9px', fontSize: 12, opacity: showTools ? 1 : 0.75 },
-          }, showTools ? '隐藏工具' : '工具')),
+      const running = meta ? Boolean(meta.running) : Boolean(session.running)
 
-        error
-          ? h('div', {
-            style: {
-              fontSize: 12, padding: '8px 10px', borderRadius: 8,
-              color: 'var(--dsw-alias-state-error-primary)',
-              background: 'var(--dsw-alias-bg-layer-2)',
-            },
-          }, error)
+      const headerRow = h('div', { style: { display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' } },
+        narrow
+          ? h(Button, { kind: 'ghost', size: 'sm', onClick: onBack, title: '返回工作区' }, '‹ 返回')
           : null,
+        h('div', {
+          style: {
+            flex: 1, minWidth: 0, fontSize: 13, lineHeight: '20px', fontWeight: 600,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          },
+        }, session.title && session.title.trim() ? session.title : '未命名会话'),
+        running ? h(Dot, { tone: 'ok' }) : null,
+        running
+          ? h(Button, { kind: 'danger', size: 'sm', onClick: stop, title: '停止这一轮' }, '停止')
+          : null)
 
+      const toolbar = h('div', { className: 'pair-toolbar' },
+        h(ModelPicker, { meta, onPick: pickModel }),
+        h(PermissionPicker, { meta, onPick: pickPermission }),
+        h('button', {
+          type: 'button',
+          className: 'pair-tool',
+          onClick: () => setShowTools((value) => !value),
+          title: '显示 / 隐藏工具调用',
+        }, showTools ? '隐藏工具' : '工具'),
+        session.cwd
+          ? h('span', {
+            style: {
+              fontSize: 11, color: 'var(--dsw-alias-label-tertiary)',
+              padding: '0 6px', overflow: 'hidden', textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap', minWidth: 0,
+            },
+          }, basename(session.cwd))
+          : null)
+
+      return h('div', { className: 'pair-detail-pane' },
+        headerRow,
+        toolbar,
+        error ? h('div', { className: 'pair-error' }, error) : null,
         h('div', {
           ref: scrollRef,
           onScroll,
           style: {
             flex: 1,
-            minHeight: 220,
-            maxHeight: '58vh',
+            minHeight: 200,
+            maxHeight: narrow ? '62vh' : 'none',
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
-            padding: '2px 2px 8px',
+            padding: '4px 2px 8px',
           },
         },
         messages.length === 0
@@ -491,9 +968,9 @@ window.__ModuleLoader__.load({
           : messages
             .filter((message) => showTools || message.role !== 'tool')
             .map((message, index) => h(MessageBubble, { key: `${message.seq}-${index}`, message }))),
-
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-end' } },
+        h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-end', flex: '0 0 auto' } },
           h('textarea', {
+            className: 'pair-textarea',
             value: draft,
             rows: 2,
             placeholder: '发到电脑上的这个会话…',
@@ -504,26 +981,12 @@ window.__ModuleLoader__.load({
                 send()
               }
             },
-            style: {
-              flex: 1,
-              resize: 'none',
-              boxSizing: 'border-box',
-              padding: '9px 11px',
-              borderRadius: 10,
-              border: '1px solid var(--dsw-alias-border-l2)',
-              background: 'var(--dsw-alias-bg-base)',
-              color: 'var(--dsw-alias-label-primary)',
-              fontSize: 13.5,
-              lineHeight: 1.5,
-              fontFamily: 'inherit',
-              minHeight: 44,
-            },
           }),
           h(Button, {
             kind: 'primary',
             onClick: send,
             disabled: sending || !draft.trim(),
-            style: { minWidth: 64, padding: '10px 14px' },
+            style: { minWidth: 64 },
           }, sending ? '发送中…' : '发送')))
     }
 
@@ -554,36 +1017,97 @@ window.__ModuleLoader__.load({
         }
       }
 
-      return h(Card, { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+      return h(Card, { style: { display: 'flex', flexDirection: 'column', gap: 6, flex: '0 0 auto' } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
           h(Dot, { tone }),
-          h('strong', { style: { fontSize: 13 } }, '手机连接地址'),
+          h('span', { style: { fontSize: 12, lineHeight: '18px', fontWeight: 600 } }, '手机连接地址'),
           h('span', {
             style: {
-              marginLeft: 'auto', fontSize: 11.5,
-              color: 'var(--dsw-alias-label-secondary)',
+              marginLeft: 'auto', fontSize: 11,
+              color: 'var(--dsw-alias-label-tertiary)',
             },
           }, stateText)),
         url
-          ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+          ? h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
             h('code', {
               style: {
-                flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: 8,
+                flex: 1, minWidth: 0, padding: '6px 8px',
+                borderRadius: 'var(--dsw-radius-sm)',
                 background: 'var(--dsw-alias-bg-base)',
-                border: '1px solid var(--dsw-alias-border-l1)',
-                fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                boxShadow: 'inset 0 0 0 .5px var(--dsw-alias-border-l1)',
+                fontSize: 11, lineHeight: '16px',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
               },
             }, url),
-            h(Button, { onClick: copy, style: { flex: '0 0 auto' } }, copied ? '已复制' : '复制'))
+            h(Button, { kind: 'outline', size: 'sm', onClick: copy }, copied ? '已复制' : '复制'))
           : null,
         !url && state !== 'starting'
-          ? h('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } },
+          ? h('div', { className: 'pair-hint' },
             info && info.tunnelError
               ? `没拿到地址：${info.tunnelError}`
               : '没拿到公网地址，检查 cloudflared 是否安装、网络是否放行。')
           : null,
-        h('div', { style: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.65 } },
-          '手机端「连接电脑」填这个地址 + 配对密钥，不需要访问密码。重启 DSH 后地址会变，回到这里复制新的。'))
+        h('div', { className: 'pair-hint' },
+          '手机端「连接电脑」填这个地址 + 配对密钥。重启 DSH 后地址会变，回到这里复制新的。'))
+    }
+
+    // -----------------------------------------------------------------------
+    // 从电脑更新
+    // -----------------------------------------------------------------------
+    function UpdateBar() {
+      const [status, setStatus] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
+      const [message, setMessage] = React.useState(null)
+
+      const check = React.useCallback(async () => {
+        try {
+          setStatus(await callJson('', '/dsh-pair/self-update/check'))
+        } catch { /* 电脑没提供包就静默 */ }
+      }, [])
+
+      React.useEffect(() => {
+        check()
+        const timer = setInterval(check, 60_000)
+        return () => clearInterval(timer)
+      }, [check])
+
+      const apply = async () => {
+        setBusy(true)
+        setMessage(null)
+        try {
+          const body = await callJson('', '/dsh-pair/self-update/apply', { method: 'POST' })
+          setMessage(`已更新到 ${body.version || '电脑版本'}，重启 DSH 后生效`)
+          await check()
+        } catch (err) {
+          setMessage('更新失败：' + String(err && err.message ? err.message : err))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      if (!status) return null
+      const local = status.local || ''
+      const remote = status.remote || ''
+      const updatable = Boolean(status.updatable) || Boolean(message && !message.startsWith('更新失败'))
+      if (!updatable && !message) return null
+
+      return h('div', {
+        style: {
+          display: 'flex', flexDirection: 'column', gap: 4,
+          padding: '8px 10px', flex: '0 0 auto',
+          borderRadius: 'var(--dsw-radius-md)',
+          background: 'var(--dsw-alias-bg-layer-1)',
+          boxShadow: 'inset 0 0 0 .5px var(--dsw-alias-border-l1)',
+        },
+      },
+      h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+        h('span', { style: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: '18px' } },
+          `电脑 ${remote || '?'} · 本机 ${local}`),
+        updatable
+          ? h(Button, { kind: 'outline', size: 'sm', onClick: apply, disabled: busy },
+            busy ? '更新中…' : '从电脑更新')
+          : null),
+      message ? h('div', { className: message.startsWith('更新失败') ? 'pair-error' : 'pair-hint' }, message) : null)
     }
 
     // -----------------------------------------------------------------------
@@ -592,11 +1116,13 @@ window.__ModuleLoader__.load({
     function PairPage() {
       const [info, setInfo] = React.useState(null)
       const [infoError, setInfoError] = React.useState(null)
-      const [sessions, setSessions] = React.useState([])
-      const [listError, setListError] = React.useState(null)
+      const [tree, setTree] = React.useState(null)
+      const [treeError, setTreeError] = React.useState(null)
       const [activeId, setActiveId] = React.useState(null)
       const [showConfig, setShowConfig] = React.useState(false)
       const [refreshing, setRefreshing] = React.useState(false)
+      const [collapsed, setCollapsed] = React.useState(() => new Set())
+      const narrow = useNarrow()
 
       const apiBase = info && info.apiBase ? info.apiBase : ''
 
@@ -624,14 +1150,14 @@ window.__ModuleLoader__.load({
         return () => { alive = false; if (timer) clearTimeout(timer) }
       }, [loadInfo])
 
-      const loadSessions = React.useCallback(async () => {
+      const loadTree = React.useCallback(async () => {
         if (!apiBase) return
         try {
-          const body = await callJson(apiBase, '/sessions')
-          setSessions(Array.isArray(body.sessions) ? body.sessions : [])
-          setListError(null)
+          const body = await callJson(apiBase, '/tree')
+          setTree(body)
+          setTreeError(null)
         } catch (err) {
-          setListError(String(err && err.message ? err.message : err))
+          setTreeError(String(err && err.message ? err.message : err))
         }
       }, [apiBase])
 
@@ -641,21 +1167,29 @@ window.__ModuleLoader__.load({
         let timer = null
         const tick = async () => {
           if (!alive) return
-          await loadSessions()
+          await loadTree()
           if (alive) timer = setTimeout(tick, 5000)
         }
         tick()
         return () => { alive = false; if (timer) clearTimeout(timer) }
-      }, [apiBase, loadSessions])
+      }, [apiBase, loadTree])
 
       const refreshNow = async () => {
         setRefreshing(true)
         await loadInfo()
-        await loadSessions()
+        await loadTree()
         setRefreshing(false)
       }
 
-      const active = sessions.find((session) => session.id === activeId) || { id: activeId, title: '' }
+      const allSessions = React.useMemo(() => {
+        if (!tree) return []
+        const list = []
+        for (const workspace of tree.workspaces || []) list.push(...workspace.sessions)
+        list.push(...(tree.others || []))
+        return list
+      }, [tree])
+
+      const active = allSessions.find((session) => session.id === activeId) || { id: activeId, title: '' }
       const role = info ? info.role : null
 
       // 换到另一套接口时，旧的会话 id 不再适用
@@ -663,10 +1197,21 @@ window.__ModuleLoader__.load({
         setActiveId(null)
       }, [role])
 
+      const toggleWorkspace = (id) => {
+        setCollapsed((prev) => {
+          const next = new Set(prev)
+          if (next.has(id)) next.delete(id)
+          else next.add(id)
+          return next
+        })
+      }
+
       // 未就绪时的兜底
       if (!info) {
-        return h('div', { style: { padding: 20, fontSize: 13, color: 'var(--dsw-alias-label-secondary)' } },
-          infoError ? `配对信息读取失败：${infoError}` : '正在读取配对状态…')
+        return h('div', { style: { padding: 20 } },
+          h(StyleSheet),
+          h('div', { className: 'pair-hint' },
+            infoError ? `配对信息读取失败：${infoError}` : '正在读取配对状态…'))
       }
 
       const isHost = role === 'host'
@@ -675,126 +1220,121 @@ window.__ModuleLoader__.load({
         ? 'error'
         : isHost
           ? (info.configured ? 'ok' : 'warn')
-          : listError
+          : treeError
             ? 'warn'
             : 'ok'
 
-      const header = h('div', { style: { display: 'flex', alignItems: 'center', gap: 9, flex: '0 0 auto' } },
+      const header = h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' } },
         h('div', {
           style: {
-            width: 30, height: 30, borderRadius: 9, display: 'grid', placeItems: 'center',
-            background: 'var(--dsw-alias-bg-layer-2)', color: 'var(--dsw-alias-brand-primary)',
+            width: 28, height: 28, borderRadius: 'var(--dsw-radius-md)',
+            display: 'grid', placeItems: 'center',
+            background: 'var(--dsw-alias-bg-layer-2)',
+            color: 'var(--dsw-alias-label-secondary)',
           },
-        }, h(PairIcon, { size: 19 })),
+        }, h(PairIcon, { size: 17 })),
         h('div', { style: { flex: 1, minWidth: 0 } },
-          h('div', { style: { fontWeight: 700, fontSize: 15, lineHeight: 1.3 } }, '远程电脑'),
+          h('div', { style: { fontSize: 14, lineHeight: '22px', fontWeight: 600 } },
+            isHost ? '本机' : `远程电脑`,
+            h('span', {
+              style: {
+                fontWeight: 400, fontSize: 11, marginLeft: 6,
+                color: 'var(--dsw-alias-label-tertiary)',
+              },
+            }, isHost ? (linked ? '已配对手机' : `${info.clients || 0} 台设备`) : (info.host || ''))),
           h('div', {
             style: {
-              fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)',
-              display: 'flex', alignItems: 'center', gap: 6, marginTop: 2,
+              fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)',
+              display: 'flex', alignItems: 'center', gap: 6,
             },
           },
           h(Dot, { tone: statusTone }),
           isHost
-            ? (linked ? '本机 · 已配对手机' : `本机作为主机 · ${info.clients || 0} 台设备`)
-            : (listError ? '连不上电脑' : '已连上电脑'))),
-        h(Button, {
-          onClick: refreshNow,
-          disabled: refreshing,
-          title: '刷新',
-          style: { padding: '6px 10px' },
-        }, refreshing ? '刷新中' : '刷新'))
+            ? (info.configured ? '作为主机等待手机' : '未配置配对密钥')
+            : (treeError ? '连不上电脑' : '已连上电脑'))),
+        h(Button, { kind: 'ghost', size: 'sm', onClick: refreshNow, disabled: refreshing, title: '刷新' },
+          refreshing ? '刷新中' : '刷新'))
 
-      const listBody = () => {
-        if (showConfig) {
-          return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-            h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } }),
-            h(Button, { onClick: () => setShowConfig(false) }, '取消'))
-        }
-        return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 } },
-          isHost ? h(TunnelCard, { info }) : null,
-          listError
-            ? h('div', {
+      const treePane = h('div', { className: 'pair-tree-pane' },
+        showConfig
+          ? h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } })
+          : h(React.Fragment, null,
+            isHost ? h(TunnelCard, { info }) : null,
+            treeError
+              ? h('div', {
+                style: {
+                  fontSize: 12, lineHeight: 1.6, padding: '9px 10px',
+                  borderRadius: 'var(--dsw-radius-md)',
+                  color: 'var(--dsw-alias-state-error-primary)',
+                  background: 'var(--dsw-alias-bg-layer-1)',
+                  boxShadow: 'inset 0 0 0 .5px var(--dsw-alias-border-l1)',
+                  flex: '0 0 auto',
+                },
+              }, treeError)
+              : null,
+            h('div', {
               style: {
-                fontSize: 12, padding: '9px 10px', borderRadius: 8,
-                color: 'var(--dsw-alias-state-error-primary)',
-                background: 'var(--dsw-alias-bg-layer-1)',
-                border: '1px solid var(--dsw-alias-border-l1)',
-                lineHeight: 1.6,
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 8, fontSize: 11, lineHeight: '16px',
+                color: 'var(--dsw-alias-label-tertiary)', flex: '0 0 auto',
               },
-            }, listError)
-            : null,
-          h('div', {
-            style: {
-              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-              gap: 8, fontSize: 12, color: 'var(--dsw-alias-label-secondary)',
             },
-          },
-          h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-            isHost
-              ? (sessions.length ? `本机 ${sessions.length} 个会话` : '本机会话')
-              : (info.host || '电脑')),
-          h(Button, {
-            onClick: () => setShowConfig(true),
-            style: { padding: '5px 9px', fontSize: 12, flex: '0 0 auto' },
-          }, isHost ? '连接电脑' : '修改连接')),
-          h('div', {
-            style: {
-              display: 'flex', flexDirection: 'column', gap: 7,
-              overflowY: 'auto', flex: 1, minHeight: 140, paddingRight: 2,
-            },
-          },
-          sessions.length
-            ? sessions.map((session) => h(SessionRow, {
-              key: session.id,
-              session,
-              active: session.id === activeId,
+            h('span', null,
+              tree ? `${(tree.workspaces || []).length} 个工作区 · ${allSessions.length} 个会话` : '工作区'),
+            h(Button, {
+              kind: 'outline',
+              size: 'sm',
+              onClick: () => setShowConfig((value) => !value),
+            }, showConfig ? '收起' : (isHost ? '连接电脑' : '修改连接'))),
+            h(WorkspaceTree, {
+              tree,
+              activeId,
               onOpen: (id) => setActiveId(id),
-            }))
-            : h(Empty, null, listError ? '接口返回了错误，先看上面的提示' : '还没有会话')),
-          isHost
-            ? h('div', {
-              style: {
-                fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)',
-                lineHeight: 1.65, paddingTop: 4,
-              },
+              collapsed,
+              onToggle: toggleWorkspace,
+            }),
+            isHost
+              ? h('div', { className: 'pair-hint', style: { paddingTop: 2, flex: '0 0 auto' } },
+                linked
+                  ? `已配对：手机端会连到 ${info.device || '本机'} 上的工作区。`
+                  : '手机端第一次用：点「连接电脑」，把上面的隧道地址和配对密钥填进去。')
+              : null))
+
+      const detailPane = h('div', { className: 'pair-detail-pane' },
+        activeId
+          ? h(SessionDetail, {
+            base: apiBase,
+            session: active,
+            narrow,
+            onBack: () => setActiveId(null),
+            onChanged: loadTree,
+          })
+          : h('div', {
+            style: {
+              flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center',
+              minHeight: 160,
             },
-            linked
-              ? `这台设备已配对：手机端面板会连到 ${info.device || '本机'} 上的会话。`
-              : '手机端第一次用：点「连接电脑」，把这里的隧道地址和配对密钥填进去。')
-            : null)
-      }
+          }, h(Empty, null, '从左边选一个会话')))
 
       return h('div', {
         style: {
-          display: 'flex', flexDirection: 'column', gap: 12,
+          display: 'flex', flexDirection: 'column', gap: 10,
           height: '100%', minHeight: 420, padding: '14px 16px 18px',
           boxSizing: 'border-box', color: 'var(--dsw-alias-label-primary)',
-          maxWidth: 860, margin: '0 auto', width: '100%',
+          maxWidth: 980, margin: '0 auto', width: '100%',
         },
       },
+      h(StyleSheet),
       header,
-      infoError
-        ? h('div', {
-          style: {
-            fontSize: 12, padding: '9px 10px', borderRadius: 8,
-            color: 'var(--dsw-alias-state-error-primary)',
-            background: 'var(--dsw-alias-bg-layer-1)',
-          },
-        }, `配对信息读取失败：${infoError}`)
-        : null,
-      activeId
-        ? h(SessionDetail, {
-          base: apiBase,
-          session: active,
-          onBack: () => setActiveId(null),
-          onChanged: loadSessions,
-        })
-        : listBody())
+      infoError ? h('div', { className: 'pair-error' }, `配对信息读取失败：${infoError}`) : null,
+      isHost ? null : h(UpdateBar),
+      h('div', { className: 'pair-panes' },
+        (narrow && activeId) ? null : treePane,
+        (narrow && !activeId) ? null : detailPane))
     }
 
     // -----------------------------------------------------------------------
-    // 审批浮层（保留）
+    // 审批浮层
     // -----------------------------------------------------------------------
     function ApprovalOverlay() {
       const [items, setItems] = React.useState([])
@@ -839,34 +1379,39 @@ window.__ModuleLoader__.load({
           display: 'flex', flexDirection: 'column', gap: 8,
           maxWidth: 'min(92vw, 420px)',
         },
-      }, items.map((item) => h('div', {
+      },
+      h(StyleSheet),
+      items.map((item) => h('div', {
         key: item.id,
         style: {
           background: 'var(--dsw-alias-bg-overlay)',
           color: 'var(--dsw-alias-label-primary)',
-          border: '1px solid var(--dsw-alias-border-l2)',
-          borderRadius: 12, padding: 14,
+          border: '.5px solid var(--dsw-alias-border-l2)',
+          borderRadius: 'var(--dsw-radius-lg)',
+          padding: 14,
           boxShadow: '0 8px 28px rgba(0,0,0,0.35)',
-          fontSize: 14, lineHeight: 1.5,
+          fontSize: 13,
+          lineHeight: 1.55,
         },
       },
-      h('div', { style: { fontWeight: 600, marginBottom: 6 } }, '电脑请求：' + (item.toolName || '未知操作')),
+      h('div', { style: { fontSize: 13, fontWeight: 600, marginBottom: 4 } },
+        '电脑请求：' + (item.toolName || '未知操作')),
       item.reason
-        ? h('div', { style: { opacity: 0.78, marginBottom: 10, wordBreak: 'break-word' } }, item.reason)
+        ? h('div', { style: { fontSize: 12, opacity: 0.78, marginBottom: 10, wordBreak: 'break-word' } }, item.reason)
         : null,
-      h('div', { style: { display: 'flex', gap: 8 } },
+      h('div', { style: { display: 'flex', gap: 8, justifyContent: 'flex-end' } },
         h(Button, {
-          kind: 'primary',
-          disabled: busy === item.id,
-          onClick: () => decide(item.id, 'allowed-once'),
-          style: { flex: 1 },
-        }, '允许'),
-        h(Button, {
-          kind: 'danger',
+          kind: 'outline',
+          size: 'sm',
           disabled: busy === item.id,
           onClick: () => decide(item.id, 'rejected'),
-          style: { flex: 1 },
-        }, '拒绝')))))
+        }, '拒绝'),
+        h(Button, {
+          kind: 'primary',
+          size: 'sm',
+          disabled: busy === item.id,
+          onClick: () => decide(item.id, 'allowed-once'),
+        }, '允许')))))
     }
 
     // -----------------------------------------------------------------------
@@ -909,23 +1454,22 @@ window.__ModuleLoader__.load({
         key,
         style: {
           display: 'flex', justifyContent: 'space-between', gap: 16,
-          padding: '7px 0', borderBottom: '1px solid var(--dsw-alias-border-l1)', fontSize: 13,
+          padding: '7px 0',
+          borderBottom: '.5px solid var(--dsw-alias-border-l1)',
+          fontSize: 13, lineHeight: '20px',
         },
       },
       h('span', { style: { color: 'var(--dsw-alias-label-secondary)', flex: '0 0 auto' } }, key),
       h('span', { style: { textAlign: 'right', wordBreak: 'break-all' } }, String(value)))
 
       return h('div', { style: { padding: '4px 2px', fontSize: 13, lineHeight: 1.6 } },
-        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 } },
+        h(StyleSheet),
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 } },
           h(Dot, { tone: connected ? 'ok' : 'idle' }),
           h('strong', null, connected ? '已连接' : '未连接'),
           h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, '· ' + role)),
-        h('div', {
-          style: {
-            fontSize: 12, color: 'var(--dsw-alias-label-secondary)',
-            marginBottom: 10, lineHeight: 1.65,
-          },
-        }, '会话列表、发消息和审批都在左侧栏「远程电脑」里。这里只放运行状态速览。'),
+        h('div', { className: 'pair-hint', style: { marginBottom: 10 } },
+          '工作区、会话和审批都在左侧栏「远程电脑」里。这里只放运行状态速览。'),
         row('角色', role === 'host' ? 'host（电脑）' : role === 'client' ? 'client（手机）' : role),
         role === 'host' ? row('已连接设备', data.clients || 0) : null,
         role === 'client' ? row('电脑地址', (data && data.host) || '—') : null,
@@ -934,8 +1478,8 @@ window.__ModuleLoader__.load({
         row('审批：回退本机', (data && data.approvalsDelegated) || 0),
         row('待审批', (data && data.approvals && data.approvals.length) || (data && data.pendingApprovals) || 0),
         data && data.lastError ? row('lastError', data.lastError) : null,
-        err ? h('div', { style: { marginTop: 10, color: 'var(--dsw-alias-label-secondary)' } }, '状态读取失败：' + err) : null,
-        h('div', { style: { marginTop: 14, color: 'var(--dsw-alias-label-secondary)', fontSize: 12 } }, '每 3 秒刷新一次'))
+        err ? h('div', { className: 'pair-hint', style: { marginTop: 10 } }, '状态读取失败：' + err) : null,
+        h('div', { className: 'pair-hint', style: { marginTop: 12, fontSize: 11 } }, '每 3 秒刷新一次'))
     }
 
     return {

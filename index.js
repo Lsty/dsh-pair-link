@@ -11,16 +11,17 @@
 //  零依赖：自带最小 WebSocket 实现（服务端 + 客户端都用运行时自带的）。
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { spawn } from 'node:child_process'
 
 export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.3.0'
+const VERSION = '0.4.0'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -29,6 +30,18 @@ const RECONNECT_MS = 5000
 const API_PREFIX = '/dsh-pair/api'
 const REMOTE_PREFIX = '/dsh-pair/remote'
 const PAGE_TOKEN_HEADER = 'x-pair-token'
+
+// 自更新只搬这些文件，且只从本包目录搬
+const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url))
+const PACKAGE_FILES = [
+  'index.js',
+  'client.js',
+  'package.json',
+  'cordis.patch.yml',
+  'icon.svg',
+  'locale/en.json',
+  'locale/zh.json',
+]
 
 // ---------------------------------------------------------------------------
 // 小工具
@@ -163,6 +176,15 @@ function isInjectedUserEvent(data, text) {
   return false
 }
 
+function blocksReasoning(content) {
+  if (!Array.isArray(content)) return ''
+  const out = []
+  for (const block of content) {
+    if (block && block.type === 'reasoning' && typeof block.text === 'string') out.push(block.text)
+  }
+  return out.join('\n\n').trim()
+}
+
 function toDisplayMessage(event) {
   const type = event?.type
   const time = Number(event?.time ?? 0)
@@ -175,7 +197,8 @@ function toDisplayMessage(event) {
   }
   if (type === 'assistant/message') {
     const data = event.data ?? {}
-    return { seq, time, role: 'assistant', text: blocksText(data.message?.content ?? data.content) }
+    const content = data.message?.content ?? data.content
+    return { seq, time, role: 'assistant', text: blocksText(content), reasoning: blocksReasoning(content) }
   }
   if (type === 'tool/call') {
     return { seq, time, role: 'tool', text: String(event.data?.name ?? '工具') }
@@ -192,7 +215,7 @@ function compactMessages(rows) {
   for (const row of rows) {
     if (!row) continue
     // 工具调用行只保留名字；其余空文本（纯推理 / 纯工具调用）不占气泡
-    if (row.role !== 'tool' && !row.text) continue
+    if (row.role !== 'tool' && !row.text && !row.reasoning) continue
     out.push(row)
   }
   return out
@@ -478,7 +501,140 @@ function applySessionApi(ctx, runtime) {
     return controller.cancel({ sessionId })
   }
 
-  return { listSessions, readMessages, promptSession, cancelSession }
+  async function ensureLiveSession(sessionId) {
+    const store = ctx.get?.('sessions')
+    let session = store?.get?.(sessionId)
+    if (session) return session
+    const controller = controllerOf()
+    if (controller?.resolveAgent) {
+      try { await controller.resolveAgent(sessionId) } catch { /* 冷会话就取不到 */ }
+      session = store?.get?.(sessionId)
+    }
+    return session ?? null
+  }
+
+  /** 工作区树：工作区（按注册顺序）→ 会话列表。 */
+  async function buildTree(signal) {
+    const flat = await listSessions(signal)
+    const byId = new Map(flat.map((row) => [row.id, row]))
+    const registry = ctx.get?.('workspaceRegistry')
+
+    let workspaces = []
+    if (registry?.list) {
+      try {
+        workspaces = registry.list()
+          .map((workspace) => ({
+            id: String(workspace.id),
+            title: workspace.title || basenameOf(workspace.path),
+            path: workspace.path,
+            sessions: (workspace.sessionIds ?? [])
+              .map((id) => byId.get(String(id)))
+              .filter(Boolean),
+          }))
+          .filter((workspace) => workspace.sessions.length > 0)
+      } catch (err) {
+        ctx.logger?.warn?.('dsh-pair-link: workspaceRegistry.list failed: %s', err?.message ?? err)
+      }
+    }
+
+    const used = new Set()
+    for (const workspace of workspaces) {
+      for (const session of workspace.sessions) used.add(session.id)
+    }
+    const others = flat.filter((row) => !used.has(row.id))
+    return { workspaces, others, device: hostname() }
+  }
+
+  /** 会话的模型 / 权限 / 运行状态。 */
+  async function sessionMeta(sessionId) {
+    const controller = controllerOf()
+    const session = await ensureLiveSession(sessionId)
+
+    let model = null
+    if (session?.requestHeader) {
+      try {
+        const header = session.requestHeader()
+        const config = header?.config
+        if (config) {
+          model = {
+            provider: String(config.provider ?? ''),
+            model: String(config.model ?? ''),
+            reasoningEffort: config.reasoningEffort ? String(config.reasoningEffort) : null,
+          }
+        }
+      } catch { /* ignore */ }
+    }
+
+    let models = null
+    try {
+      if (controller?.modelCatalog) models = await controller.modelCatalog()
+    } catch { /* ignore */ }
+
+    let permission = null
+    const presets = ctx.get?.('permissionPresets')
+    if (presets && session) {
+      try {
+        const catalog = presets.catalog()
+        permission = {
+          current: presets.current(session),
+          options: catalog?.options ?? [],
+        }
+      } catch { /* ignore */ }
+    }
+
+    const state = await controller?.state?.({ sessionId }, AbortSignal.timeout(8000)).catch(() => null)
+
+    return {
+      ok: true,
+      sessionId,
+      model,
+      models,
+      permission,
+      running: Boolean(state?.running),
+      pendingInput: state?.pendingInput ?? [],
+    }
+  }
+
+  async function setSessionModel(sessionId, input) {
+    const controller = controllerOf()
+    if (!controller?.selectModel) throw new Error('这个 DSH 版本没有可用的模型切换接口')
+    const provider = String(input?.provider ?? '')
+    const model = String(input?.model ?? '')
+    if (!provider || !model) throw new Error('缺少 provider / model')
+    const result = await controller.selectModel({
+      sessionId,
+      provider,
+      model,
+      ...(input?.reasoningEffort ? { reasoningEffort: String(input.reasoningEffort) } : {}),
+    })
+    return { ok: true, ...result }
+  }
+
+  async function setSessionPermission(sessionId, name) {
+    const presets = ctx.get?.('permissionPresets')
+    if (!presets?.set) throw new Error('这个 DSH 版本没有可用的权限预设')
+    const session = await ensureLiveSession(sessionId)
+    if (!session) throw new Error('会话没有加载，暂时不能切换权限')
+    presets.set(session, String(name ?? ''))
+    return { ok: true, name: String(name ?? '') }
+  }
+
+  return {
+    listSessions,
+    readMessages,
+    promptSession,
+    cancelSession,
+    buildTree,
+    sessionMeta,
+    setSessionModel,
+    setSessionPermission,
+  }
+}
+
+function basenameOf(path) {
+  const text = String(path ?? '').replace(/[\\/]+$/, '')
+  const parts = text.split(/[\\/]/)
+  return parts[parts.length - 1] || text
 }
 
 // ---------------------------------------------------------------------------
@@ -532,8 +688,20 @@ function applyHostRoutes(ctx, runtime, sessions) {
         return
       }
 
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'tree') {
+        const tree = await sessions.buildTree(controller.signal)
+        sendJson(res, 200, { ok: true, ...tree, now: Date.now() })
+        return
+      }
+
       if (segments[0] === 'sessions' && segments.length >= 2) {
         const sessionId = decodeURIComponent(segments[1])
+
+        if (req.method === 'GET' && segments[2] === 'meta') {
+          const meta = await sessions.sessionMeta(sessionId)
+          sendJson(res, 200, meta)
+          return
+        }
 
         if (req.method === 'GET' && segments[2] === 'messages') {
           const page = await sessions.readMessages(sessionId, {
@@ -541,6 +709,24 @@ function applyHostRoutes(ctx, runtime, sessions) {
             beforeSeq: url.searchParams.get('before'),
           }, controller.signal)
           sendJson(res, 200, { ok: true, sessionId, ...page })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'model') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
+          const result = await sessions.setSessionModel(sessionId, body)
+          sendJson(res, 200, result)
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'permission') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
+          const result = await sessions.setSessionPermission(sessionId, body?.name)
+          sendJson(res, 200, result)
           return
         }
 
@@ -620,7 +806,71 @@ function applyHostRoutes(ctx, runtime, sessions) {
       publicUrl: runtime.publicUrl,
       tunnelState: runtime.tunnelState,
       tunnelError: runtime.tunnelError,
+      packageVersion: localPackageVersion(),
     })
+  })
+
+  // --- 自更新：清单 / 文件 ---
+  route('exact', '/dsh-pair/pkg/manifest', (req, res) => {
+    cors(res)
+    if (!authorize(req)) { sendJson(res, 401, { ok: false, error: 'unauthorized' }); return }
+    sendJson(res, 200, packageManifest())
+  })
+
+  route('exact', '/dsh-pair/pkg/file', (req, res) => {
+    cors(res)
+    if (!authorize(req)) { sendJson(res, 401, { ok: false, error: 'unauthorized' }); return }
+    const rel = requestUrl(req).searchParams.get('path') ?? ''
+    const buf = packageFile(rel)
+    if (!buf) { sendJson(res, 404, { ok: false, error: 'no such package file' }); return }
+    res.statusCode = 200
+    res.setHeader('content-type', 'application/octet-stream')
+    res.setHeader('cache-control', 'no-store')
+    res.end(buf)
+  })
+
+  // --- 自更新：检查 / 执行（只认本机页面令牌，远程密钥不能改手机代码） ---
+  route('exact', '/dsh-pair/self-update/check', async (req, res) => {
+    cors(res)
+    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+      return sendJson(res, 403, { ok: false, error: 'bad page token' })
+    }
+    const local = localPackageVersion()
+    if (!runtime.remote) return sendJson(res, 200, { ok: true, local, remote: null, updatable: false })
+    try {
+      const manifestRes = await fetch(`${runtime.remote.httpOrigin}/dsh-pair/pkg/manifest`, {
+        headers: { [PAGE_TOKEN_HEADER]: runtime.secret },
+        signal: AbortSignal.timeout(8000),
+      })
+      if (!manifestRes.ok) {
+        return sendJson(res, 200, { ok: true, local, remote: null, updatable: false, error: `电脑返回 HTTP ${manifestRes.status}` })
+      }
+      const manifest = await manifestRes.json()
+      const remote = String(manifest?.version ?? '')
+      return sendJson(res, 200, {
+        ok: true,
+        local,
+        remote,
+        updatable: Boolean(remote) && remote !== local,
+        files: Array.isArray(manifest?.files) ? manifest.files.length : 0,
+      })
+    } catch (err) {
+      return sendJson(res, 200, { ok: true, local, remote: null, updatable: false, error: String(err?.message ?? err) })
+    }
+  })
+
+  route('exact', '/dsh-pair/self-update/apply', async (req, res) => {
+    cors(res)
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+      return sendJson(res, 403, { ok: false, error: 'bad page token' })
+    }
+    try {
+      const result = await applySelfUpdate(runtime)
+      return sendJson(res, 200, { ...result, local: localPackageVersion(), restartRequired: true })
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
+    }
   })
 
   // --- 保存连接配置（立即生效，不需要重启） ---
@@ -943,9 +1193,96 @@ function stopTunnel(runtime) {
   try { child.kill() } catch { /* ignore */ }
 }
 
+// ---------------------------------------------------------------------------
+// 自更新：电脑端提供包清单/文件，手机端自己拉取替换
+// ---------------------------------------------------------------------------
+function localPackageVersion() {
+  try {
+    const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8'))
+    return String(pkg.version ?? VERSION)
+  } catch {
+    return VERSION
+  }
+}
+
+function packageManifest() {
+  const files = []
+  for (const rel of PACKAGE_FILES) {
+    try {
+      const buf = readFileSync(join(PACKAGE_ROOT, rel))
+      files.push({
+        path: rel,
+        sha256: createHash('sha256').update(buf).digest('hex'),
+        size: buf.length,
+      })
+    } catch { /* 缺文件就跳过 */ }
+  }
+  return { ok: true, version: localPackageVersion(), files }
+}
+
+function packageFile(rel) {
+  if (!PACKAGE_FILES.includes(rel)) return null
+  try {
+    return readFileSync(join(PACKAGE_ROOT, rel))
+  } catch {
+    return null
+  }
+}
+
+async function applySelfUpdate(runtime) {
+  if (!runtime.remote) throw new Error('还没有配置电脑地址')
+  if (!runtime.secret) throw new Error('还没有配置配对密钥')
+  const base = runtime.remote.httpOrigin
+  const headers = { [PAGE_TOKEN_HEADER]: runtime.secret }
+
+  const manifestRes = await fetch(`${base}/dsh-pair/pkg/manifest`, {
+    headers,
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!manifestRes.ok) throw new Error(`电脑返回 HTTP ${manifestRes.status}`)
+  const manifest = await manifestRes.json()
+  const files = Array.isArray(manifest?.files) ? manifest.files : []
+  if (files.length === 0) throw new Error('电脑没有提供可更新的文件')
+
+  const downloaded = []
+  for (const file of files) {
+    if (!PACKAGE_FILES.includes(file.path)) continue
+    const res = await fetch(`${base}/dsh-pair/pkg/file?path=${encodeURIComponent(file.path)}`, {
+      headers,
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!res.ok) throw new Error(`下载 ${file.path} 失败：HTTP ${res.status}`)
+    const buf = Buffer.from(await res.arrayBuffer())
+    const sha = createHash('sha256').update(buf).digest('hex')
+    if (sha !== file.sha256) throw new Error(`${file.path} 校验失败，已放弃更新`)
+    downloaded.push({ path: file.path, buf })
+  }
+  if (downloaded.length === 0) throw new Error('没有可用的文件')
+
+  // 先备份再覆盖：中途失败时旧文件还在备份目录里
+  const backupDir = join(PACKAGE_ROOT, `.backup-${Date.now()}`)
+  mkdirSync(backupDir, { recursive: true })
+  for (const item of downloaded) {
+    try {
+      copyFileSync(join(PACKAGE_ROOT, item.path), join(backupDir, item.path.replace(/[\\/]/g, '_')))
+    } catch { /* 本地还没有这个文件 */ }
+  }
+  for (const item of downloaded) {
+    const full = join(PACKAGE_ROOT, item.path)
+    mkdirSync(dirname(full), { recursive: true })
+    writeFileSync(full, item.buf)
+  }
+
+  return {
+    ok: true,
+    version: String(manifest?.version ?? ''),
+    files: downloaded.map((item) => item.path),
+    backup: backupDir,
+  }
+}
+
 /** 电脑前面有 dsh-bridge 之类的登录墙时，用访问密码换一个会话 cookie。 */
-async function ensureBridgeCookie(runtime) {
-  if (!runtime.bridgePassword || !runtime.remote) return ''
+async function ensureBridgeCookie(runtime) {  if (!runtime.bridgePassword || !runtime.remote) return ''
   if (runtime.bridgeCookie) return runtime.bridgeCookie
   let res
   try {
