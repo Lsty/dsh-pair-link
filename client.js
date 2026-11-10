@@ -1218,7 +1218,7 @@ window.__ModuleLoader__.load({
 
       React.useEffect(() => {
         loadMeta()
-        const timer = setInterval(loadMeta, 10_000)
+        const timer = setInterval(loadMeta, 3_000)
         return () => clearInterval(timer)
       }, [loadMeta])
 
@@ -1288,7 +1288,7 @@ window.__ModuleLoader__.load({
           setDraft('')
           setPending([])
           stickToBottom.current = true
-          await load()
+          await Promise.all([load(), loadMeta()])
           if (onChanged) onChanged()
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
