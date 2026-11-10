@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.7'
+const VERSION = '0.4.8'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -442,6 +442,10 @@ function createRuntime(ctx, config, disk) {
     publishToken: String(config?.publishToken ?? '') || String(disk.publishToken ?? ''),
     publishRepo: String(config?.publishRepo ?? '') || String(disk.publishRepo ?? 'Lsty/dsh-pair-link'),
     publishPath: String(config?.publishPath ?? '') || String(disk.publishPath ?? 'endpoint.json'),
+    giteeToken: String(config?.giteeToken ?? '') || String(disk.giteeToken ?? ''),
+    giteeRepo: String(config?.giteeRepo ?? '') || String(disk.giteeRepo ?? ''),
+    giteePath: String(config?.giteePath ?? '') || String(disk.giteePath ?? 'endpoint.json'),
+    giteeUser: String(config?.giteeUser ?? '') || String(disk.giteeUser ?? ''),
     publishPrivateKey: String(disk.publishPrivateKey ?? ''),
     publishPublicKey: String(config?.publishPublicKey ?? '') || String(disk.publishPublicKey ?? ''),
     publishStatus: '',
@@ -1665,13 +1669,16 @@ function ensureSigningKey(runtime) {
   }
 }
 
-async function publishEndpoint(runtime) {
-  if (!runtime.publishToken || !runtime.publishRepo || !runtime.publicUrl) return
+function signedEndpoint(runtime) {
   const key = ensureSigningKey(runtime)
   const device = hostname()
   const ts = Date.now()
   const sig = sign(null, Buffer.from(endpointPayload(device, runtime.publicUrl, ts)), key.privateKey).toString('base64')
-  const body = { device, url: runtime.publicUrl, ts, publicKey: key.publicKey, sig }
+  return { device, url: runtime.publicUrl, ts, publicKey: key.publicKey, sig }
+}
+
+async function publishToGitHub(runtime) {
+  const body = signedEndpoint(runtime)
   const api = `https://api.github.com/repos/${runtime.publishRepo}/contents/${runtime.publishPath}`
   const headers = {
     authorization: `Bearer ${runtime.publishToken}`,
@@ -1700,27 +1707,82 @@ async function publishEndpoint(runtime) {
     signal: AbortSignal.timeout(12_000),
   })
   if (!res.ok) throw new Error(`GitHub 发布失败：HTTP ${res.status}`)
-  runtime.publishStatus = `已发布 ${new Date().toISOString()}`
-  runtime.publishError = null
+}
+
+async function publishToGitee(runtime) {
+  const body = signedEndpoint(runtime)
+  const content = Buffer.from(`${JSON.stringify(body, null, 2)}\n`).toString('base64')
+  const token = encodeURIComponent(runtime.giteeToken)
+  const base = `https://gitee.com/api/v5/repos/${runtime.giteeRepo}/contents/${runtime.giteePath}`
+
+  let sha
+  try {
+    const current = await fetch(`${base}?access_token=${token}`, { signal: AbortSignal.timeout(8000) })
+    if (current.ok) {
+      const json = await current.json()
+      sha = json?.sha
+    }
+  } catch { /* 当作新文件 */ }
+
+  const res = await fetch(`${base}?access_token=${token}`, {
+    method: sha ? 'PUT' : 'POST',
+    headers: { 'content-type': 'application/json', 'user-agent': 'dsh-pair-link' },
+    body: JSON.stringify({
+      content,
+      message: 'chore: publish dsh-pair-link endpoint',
+      ...(sha ? { sha } : {}),
+    }),
+    signal: AbortSignal.timeout(15_000),
+  })
+  if (!res.ok) {
+    let detail = ''
+    try { detail = (await res.text()).slice(0, 120) } catch { /* ignore */ }
+    throw new Error(`Gitee 发布失败：HTTP ${res.status} ${detail}`)
+  }
+}
+
+/** 电脑端拿到新隧道地址后，把签名端点写到所有已配置的仓库。 */
+async function publishEndpoint(runtime) {
+  if (!runtime.publicUrl) return
+  const targets = []
+  if (runtime.publishToken && runtime.publishRepo) targets.push({ name: 'GitHub', run: publishToGitHub(runtime) })
+  if (runtime.giteeToken && runtime.giteeRepo) targets.push({ name: 'Gitee', run: publishToGitee(runtime) })
+  if (targets.length === 0) return
+
+  const results = await Promise.allSettled(targets.map((target) => target.run))
+  const done = []
+  const failed = []
+  results.forEach((result, index) => {
+    if (result.status === 'fulfilled') done.push(targets[index].name)
+    else failed.push(`${targets[index].name}: ${result.reason?.message ?? result.reason}`)
+  })
+  if (done.length > 0) runtime.publishStatus = `已发布 ${done.join(' + ')} ${new Date().toISOString()}`
+  runtime.publishError = failed.length > 0 ? failed.join('；') : null
 }
 
 /**
  * 多个源并行读端点文件：手机网络到 api.github.com 可能不通，
  * 镜像源（ghfast / gitmirror）通常可达。谁先成功用谁。
  */
-function endpointSources(repo, path) {
-  return [
+function endpointSources(runtime) {
+  const repo = runtime.publishRepo || 'Lsty/dsh-pair-link'
+  const path = runtime.publishPath || 'endpoint.json'
+  const sources = []
+  if (runtime.giteeRepo) {
+    // Gitee raw 国内直连，作为第一优先
+    sources.push(`https://gitee.com/${runtime.giteeRepo}/raw/main/${runtime.giteePath || 'endpoint.json'}`)
+  }
+  sources.push(
     `https://api.github.com/repos/${repo}/contents/${path}?ref=main`,
     `https://ghfast.top/https://raw.githubusercontent.com/${repo}/main/${path}`,
     `https://raw.gitmirror.com/${repo}/main/${path}`,
     `https://raw.githubusercontent.com/${repo}/main/${path}`,
-  ]
+  )
+  return sources
 }
 
 async function fetchEndpointFromGitHub(runtime) {
-  const repo = runtime.publishRepo || 'Lsty/dsh-pair-link'
-  const path = runtime.publishPath || 'endpoint.json'
-  const sources = endpointSources(repo, path)
+  const sources = endpointSources(runtime)
 
   const loadOne = async (url) => {
     const isApi = url.includes('api.github.com')
