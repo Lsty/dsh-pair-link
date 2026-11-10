@@ -309,6 +309,64 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
 }
 
+.pair-tree { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 120px; padding-right: 2px; }
+.pair-search { position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; background: var(--dsw-alias-bg-layer-1); }
+.pair-search input {
+  width: 100%;
+  height: 30px;
+  padding: 0 10px;
+  box-sizing: border-box;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l1);
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--dsw-alias-label-primary);
+  outline: none;
+}
+.pair-search input:focus { box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary); }
+.pair-ws-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  font-family: inherit;
+  color: inherit;
+  text-align: left;
+}
+.pair-ws-add {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 18px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.pair-ws-add:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.pair-row-more {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 15px;
+  line-height: 18px;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.pair-row-more:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+
 .pair-reasoning {
   margin: 2px 0 4px;
   padding: 8px 10px;
@@ -701,19 +759,24 @@ window.__ModuleLoader__.load({
     // -----------------------------------------------------------------------
     // 工作区 / 会话树
     // -----------------------------------------------------------------------
-    function SessionRow({ session, active, onOpen }) {
+    function SessionRow({ session, active, onOpen, onMenu }) {
       const title = session.title && session.title.trim()
         ? session.title
         : `未命名 · ${basename(session.cwd) || '会话'}`
-      return h('button', {
-        type: 'button',
+      return h('div', {
         className: 'pair-row',
         'data-active': active ? 'true' : 'false',
+        role: 'button',
+        tabIndex: 0,
         onClick: () => onOpen(session.id),
+        onKeyDown: (e) => { if (e.key === 'Enter') onOpen(session.id) },
       },
       h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
           session.running ? h(Dot, { tone: 'ok' }) : null,
+          session.pendingInput === 'approval' || session.pendingInput === 'question'
+            ? h(Dot, { tone: 'warn' })
+            : null,
           h('span', { className: 'pair-row-title' }, title)),
         h('div', { className: 'pair-row-meta' },
           h('span', null, formatWhen(session.updatedAt)),
@@ -725,57 +788,89 @@ window.__ModuleLoader__.load({
               },
             }, basename(session.cwd))
             : null)),
+      onMenu
+        ? h('button', {
+          type: 'button',
+          className: 'pair-row-more',
+          title: '更多操作',
+          onClick: (e) => {
+            e.stopPropagation()
+            const rect = e.currentTarget.getBoundingClientRect()
+            onMenu(session, rect)
+          },
+        }, '⋯')
+        : null,
       active ? h('span', { style: { color: 'var(--dsw-alias-state-business-primary)', fontSize: 13 } }, '•') : null)
     }
 
-    function WorkspaceTree({ tree, activeId, onOpen, collapsed, onToggle }) {
+    function WorkspaceTree({ tree, activeId, onOpen, collapsed, onToggle, q, onQuery, onCreate, onMenu }) {
       if (!tree) return h(Empty, null, '正在读取工作区…')
       const workspaces = tree.workspaces || []
       const others = tree.others || []
+      const query = String(q || '').trim().toLowerCase()
+      const matches = (session) => {
+        if (!query) return true
+        const haystack = `${session.title || ''} ${session.cwd || ''}`.toLowerCase()
+        return haystack.includes(query)
+      }
 
-      const group = (key, label, sessions, collapsible, collapsedNow, toggle) => {
-        if (!sessions.length) return null
+      const group = (key, label, sessions, collapsible, collapsedNow, toggle, workspaceId) => {
+        const visible = sessions.filter(matches)
+        if (!visible.length && query) return null
+        if (!visible.length && !collapsible) return null
         return h('div', { key },
           collapsible
-            ? h('button', {
-              type: 'button',
-              className: 'pair-ws',
-              onClick: toggle,
-            },
-            h('span', { className: 'pair-ws-caret' }, collapsedNow ? '›' : '⌄'),
-            h('span', { className: 'pair-ws-title' }, label),
-            h('span', { className: 'pair-ws-count' }, String(sessions.length)))
+            ? h('div', { className: 'pair-ws' },
+              h('button', {
+                type: 'button',
+                className: 'pair-ws-main',
+                onClick: toggle,
+              },
+              h('span', { className: 'pair-ws-caret' }, collapsedNow ? '›' : '⌄'),
+              h('span', { className: 'pair-ws-title' }, label),
+              h('span', { className: 'pair-ws-count' }, String(visible.length))),
+              workspaceId && onCreate
+                ? h('button', {
+                  type: 'button',
+                  className: 'pair-ws-add',
+                  title: '在这个工作区新建会话',
+                  onClick: () => onCreate(workspaceId),
+                }, '＋')
+                : null)
             : h('div', { className: 'pair-ws', style: { cursor: 'default' } },
               h('span', { className: 'pair-ws-caret' }),
               h('span', { className: 'pair-ws-title' }, label),
-              h('span', { className: 'pair-ws-count' }, String(sessions.length))),
+              h('span', { className: 'pair-ws-count' }, String(visible.length))),
           collapsedNow
             ? null
             : h('div', { className: 'pair-ws-sessions' },
-              sessions.map((session) => h(SessionRow, {
+              visible.map((session) => h(SessionRow, {
                 key: session.id,
                 session,
                 active: session.id === activeId,
                 onOpen,
+                onMenu,
               }))))
       }
 
-      return h('div', {
-        style: {
-          display: 'flex', flexDirection: 'column', gap: 2,
-          overflowY: 'auto', flex: 1, minHeight: 120, paddingRight: 2,
-        },
-      },
-      workspaces.map((workspace) => group(
-        workspace.id,
-        workspace.title || basename(workspace.path),
-        workspace.sessions,
-        true,
-        collapsed.has(workspace.id),
-        () => onToggle(workspace.id),
-      )),
-      group(
-        '__others__',
+      return h('div', { className: 'pair-tree' },
+        h('div', { className: 'pair-search' },
+          h('input', {
+            value: q || '',
+            placeholder: '搜索会话标题 / 路径',
+            onChange: (e) => onQuery(e.target.value),
+          })),
+        workspaces.map((workspace) => group(
+          workspace.id,
+          workspace.title || basename(workspace.path),
+          workspace.sessions,
+          true,
+          collapsed.has(workspace.id),
+          () => onToggle(workspace.id),
+          workspace.id,
+        )),
+        group(
+          '__others__',
         '其他会话',
         others,
         true,
@@ -1617,6 +1712,77 @@ window.__ModuleLoader__.load({
       const [showConfig, setShowConfig] = React.useState(false)
       const [refreshing, setRefreshing] = React.useState(false)
       const [collapsed, setCollapsed] = React.useState(() => new Set())
+      const [q, setQ] = React.useState('')
+      const [menuTarget, setMenuTarget] = React.useState(null)
+
+      const createIn = async (workspaceId) => {
+        try {
+          const body = await callJson('', '/dsh-pair/api/sessions', {
+            method: 'POST',
+            body: JSON.stringify({ workspaceId }),
+          })
+          await loadTree()
+          if (body && body.sessionId) setActiveId(body.sessionId)
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      const renameSession = async (session) => {
+        setMenuTarget(null)
+        const next = window.prompt('新的会话标题', session.title || '')
+        if (next === null) return
+        const title = next.trim()
+        if (!title) return
+        try {
+          await callJson('', `/dsh-pair/api/sessions/${encodeURIComponent(session.id)}/rename`, {
+            method: 'POST',
+            body: JSON.stringify({ title }),
+          })
+          await loadTree()
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      const archiveSession = async (session) => {
+        setMenuTarget(null)
+        try {
+          await callJson('', `/dsh-pair/api/sessions/${encodeURIComponent(session.id)}/archive`, {
+            method: 'POST',
+            body: JSON.stringify({ archived: true }),
+          })
+          await loadTree()
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      const pinSession = async (session) => {
+        setMenuTarget(null)
+        try {
+          await callJson('', `/dsh-pair/api/sessions/${encodeURIComponent(session.id)}/pin`, {
+            method: 'POST',
+            body: JSON.stringify({ pinned: true }),
+          })
+          await loadTree()
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      const forkSession = async (session) => {
+        setMenuTarget(null)
+        try {
+          const body = await callJson('', `/dsh-pair/api/sessions/${encodeURIComponent(session.id)}/fork`, {
+            method: 'POST',
+          })
+          await loadTree()
+          if (body && body.sessionId) setActiveId(body.sessionId)
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
       const narrow = useNarrow()
 
       const apiBase = info && info.apiBase ? info.apiBase : ''
@@ -1799,6 +1965,14 @@ window.__ModuleLoader__.load({
               onOpen: (id) => setActiveId(id),
               collapsed,
               onToggle: toggleWorkspace,
+              q,
+              onQuery: setQ,
+              onCreate: createIn,
+              onMenu: (session, rect) => setMenuTarget({
+                session,
+                left: Math.max(8, Math.min(rect.right - 160, window.innerWidth - 172)),
+                top: Math.min(rect.bottom + 4, window.innerHeight - 220),
+              }),
             }),
             isHost
               ? h('div', { className: 'pair-hint', style: { paddingTop: 2, flex: '0 0 auto' } },
@@ -1837,7 +2011,29 @@ window.__ModuleLoader__.load({
       isHost ? null : h(UpdateBar),
       h('div', { className: 'pair-panes' },
         (narrow && activeId) ? null : treePane,
-        (narrow && !activeId) ? null : detailPane))
+        (narrow && !activeId) ? null : detailPane),
+      menuTarget
+        ? h('div', {
+          style: { position: 'fixed', inset: 0, zIndex: 500 },
+          onClick: () => setMenuTarget(null),
+        },
+        h('div', {
+          className: 'pair-menu',
+          style: {
+            position: 'fixed',
+            left: menuTarget.left,
+            top: menuTarget.top,
+            width: 156,
+            padding: 4,
+            zIndex: 501,
+          },
+          onClick: (e) => e.stopPropagation(),
+        },
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => renameSession(menuTarget.session) }, '改名'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => pinSession(menuTarget.session) }, '固定'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => forkSession(menuTarget.session) }, '分叉'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => archiveSession(menuTarget.session) }, '归档')))
+        : null)
     }
 
     // -----------------------------------------------------------------------

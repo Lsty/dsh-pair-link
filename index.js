@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.11'
+const VERSION = '0.4.12'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -847,6 +847,85 @@ function applySessionApi(ctx, runtime) {
     return { ok: true, name: String(name ?? '') }
   }
 
+  /** 会话内容搜索（不恢复 Agent）。 */
+  async function searchSessions(query) {
+    const controller = controllerOf()
+    if (!controller?.search) throw new Error('这个 DSH 版本没有搜索接口')
+    const result = await controller.search({ query: String(query ?? '') }, AbortSignal.timeout(20_000))
+    return {
+      items: Array.isArray(result?.items) ? result.items : [],
+      hasMore: Boolean(result?.hasMore),
+    }
+  }
+
+  async function createSession(workspaceId) {
+    const controller = controllerOf()
+    if (!controller?.create) throw new Error('这个 DSH 版本没有新建会话接口')
+    const result = await controller.create({ ...(workspaceId ? { workspaceId } : {}) })
+    return { sessionId: result?.sessionId ?? null }
+  }
+
+  async function renameSession(sessionId, title) {
+    const controller = controllerOf()
+    if (!controller?.rename) throw new Error('这个 DSH 版本没有改名接口')
+    const result = await controller.rename({ sessionId, title: String(title ?? '') })
+    return { title: result?.title ?? String(title ?? '') }
+  }
+
+  async function forkSession(sessionId) {
+    const controller = controllerOf()
+    if (!controller?.fork) throw new Error('这个 DSH 版本没有分叉接口')
+    const result = await controller.fork({ sessionId, allowMigration: false })
+    return { sessionId: result?.sessionId ?? null }
+  }
+
+  async function archiveSession(sessionId, archived) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.archiveSession) throw new Error('这个 DSH 版本没有归档接口')
+    const result = archived === false
+      ? await workspaces.unarchiveSession({ sessionId })
+      : await workspaces.archiveSession({ sessionId })
+    return { archivedSessionIds: result?.archivedSessionIds ?? [] }
+  }
+
+  async function pinSession(sessionId, pinned) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.pinSession) throw new Error('这个 DSH 版本没有固定接口')
+    const result = pinned === false
+      ? await workspaces.unpinSession({ sessionId })
+      : await workspaces.pinSession({ sessionId })
+    return { pinnedSessionIds: result?.pinnedSessionIds ?? [] }
+  }
+
+  async function renameWorkspace(workspaceId, title) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.rename) throw new Error('这个 DSH 版本没有工作区改名接口')
+    const result = await workspaces.rename({ workspaceId, title: String(title ?? '') })
+    return { workspace: result?.workspace ?? null }
+  }
+
+  /** 读一次工作区 baseline，拿到归档/固定集合。 */
+  async function readWorkspaceMarks() {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.follow) return { archived: [], pinned: [] }
+    const controller = new AbortController()
+    try {
+      for await (const frame of workspaces.follow(controller.signal)) {
+        if (frame?.type === 'baseline') {
+          const value = frame.value ?? {}
+          return {
+            archived: Array.isArray(value.archivedSessionIds) ? value.archivedSessionIds : [],
+            pinned: Array.isArray(value.pinnedSessionIds) ? value.pinnedSessionIds : [],
+          }
+        }
+        break
+      }
+    } catch { /* ignore */ } finally {
+      try { controller.abort() } catch { /* ignore */ }
+    }
+    return { archived: [], pinned: [] }
+  }
+
   return {
     listSessions,
     readMessages,
@@ -854,6 +933,14 @@ function applySessionApi(ctx, runtime) {
     cancelSession,
     uploadToSession,
     answerQuestion,
+    searchSessions,
+    createSession,
+    renameSession,
+    forkSession,
+    archiveSession,
+    pinSession,
+    renameWorkspace,
+    readWorkspaceMarks,
     buildTree,
     sessionMeta,
     updateQueue,
@@ -919,9 +1006,40 @@ function applyHostRoutes(ctx, runtime, sessions) {
         return
       }
 
+      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'sessions') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = await sessions.createSession(body?.workspaceId ? String(body.workspaceId) : '')
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'search') {
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const result = await sessions.searchSessions(url.searchParams.get('q') ?? '')
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'marks') {
+        const marks = await sessions.readWorkspaceMarks()
+        sendJson(res, 200, { ok: true, ...marks })
+        return
+      }
+
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'tree') {
         const tree = await sessions.buildTree(controller.signal)
         sendJson(res, 200, { ok: true, ...tree, now: Date.now() })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length >= 3 && segments[0] === 'workspaces' && segments[2] === 'rename') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = await sessions.renameWorkspace(decodeURIComponent(segments[1]), String(body?.title ?? ''))
+        sendJson(res, 200, { ok: true, ...result })
         return
       }
 
@@ -996,6 +1114,39 @@ function applyHostRoutes(ctx, runtime, sessions) {
           let body
           try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
           const result = await sessions.updateQueue(sessionId, String(body?.itemId ?? ''), body?.action)
+          sendJson(res, 200, { ok: true, ...result })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'rename') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
+          const result = await sessions.renameSession(sessionId, String(body?.title ?? ''))
+          sendJson(res, 200, { ok: true, ...result })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'fork') {
+          const result = await sessions.forkSession(sessionId)
+          sendJson(res, 200, { ok: true, ...result })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'archive') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw || '{}') } catch { body = {} }
+          const result = await sessions.archiveSession(sessionId, body?.archived === false ? false : true)
+          sendJson(res, 200, { ok: true, ...result })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'pin') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw || '{}') } catch { body = {} }
+          const result = await sessions.pinSession(sessionId, body?.pinned === false ? false : true)
           sendJson(res, 200, { ok: true, ...result })
           return
         }
