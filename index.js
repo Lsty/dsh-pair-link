@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.14'
+const VERSION = '0.4.15'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 15 * 60_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -421,7 +421,7 @@ class PairSocket {
 function createRuntime(ctx, config, disk) {
   const runtime = {
     startedAt: Date.now(),
-    pageToken: randomBytes(18).toString('hex'),
+    pageToken: String(config?.pageToken ?? '') || String(disk.pageToken ?? '') || randomBytes(18).toString('hex'),
     secret: String(config?.secret ?? '') || String(disk.secret ?? ''),
     wsPath: String(config?.path ?? '/dsh-pair/ws'),
     remote: resolveRemote(
@@ -2534,6 +2534,11 @@ export function apply(ctx, config) {
   const disk = readDiskConfig()
   const runtime = createRuntime(ctx, config, disk)
   const sessions = applySessionApi(ctx, runtime)
+
+  // pageToken 必须跨重载保持，否则已打开的页面全部 403、审批浮层永远是空的
+  if (!disk.pageToken && runtime.pageToken) {
+    try { writeDiskConfig({ pageToken: runtime.pageToken }) } catch { /* ignore */ }
+  }
 
   applyHostRoutes(ctx, runtime, sessions)
   applyProxy(ctx, runtime)
