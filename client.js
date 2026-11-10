@@ -234,6 +234,59 @@ window.__ModuleLoader__.load({
 .pair-image { display: block; max-width: 100%; max-height: 260px; border-radius: var(--dsw-radius-md); }
 .pair-image-note { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
 
+.pair-question {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--dsw-radius-lg);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: inset 0 0 0 .5px var(--dsw-alias-state-warn-primary);
+}
+.pair-question-title { font-size: 13px; line-height: 20px; font-weight: 600; }
+.pair-question-item { display: flex; flex-direction: column; gap: 4px; }
+.pair-question-header { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.pair-question-text { font-size: 13px; line-height: 20px; white-space: pre-wrap; word-break: break-word; }
+.pair-question-options { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.pair-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l1);
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+  color: var(--dsw-alias-label-primary);
+}
+.pair-option:hover:not(:disabled) { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-option[data-active="true"] {
+  background: var(--dsw-alias-interactive-bg-active);
+  box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary);
+}
+.pair-option:disabled { opacity: .55; cursor: default; }
+.pair-option-label { font-size: 13px; line-height: 20px; }
+.pair-option-desc { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.pair-question-actions { display: flex; gap: 8px; margin-top: 2px; }
+.pair-more {
+  align-self: center;
+  margin: 2px 0;
+  padding: 4px 10px;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  cursor: pointer;
+}
+.pair-more:hover { background: var(--dsw-alias-interactive-bg-hover); }
+
 .pair-reasoning {
   margin: 2px 0 4px;
   padding: 8px 10px;
@@ -805,8 +858,70 @@ window.__ModuleLoader__.load({
         }))
     }
 
-    function MessageBubble({ message }) {
+    function QuestionCard({ message, onAnswer, busy }) {
+      const questions = Array.isArray(message.questions) ? message.questions : []
+      const [selected, setSelected] = React.useState({})
+      const [error, setError] = React.useState(null)
+      const pending = message.pending !== false
+
+      const toggle = (question, label) => {
+        if (!pending) return
+        setSelected((prev) => {
+          const current = prev[question.id] || []
+          const next = question.multiSelect
+            ? (current.includes(label) ? current.filter((item) => item !== label) : [...current, label])
+            : [label]
+          return { ...prev, [question.id]: next }
+        })
+      }
+
+      const ready = pending && questions.every((question) => (selected[question.id] || []).length > 0)
+
+      const submit = async () => {
+        if (!ready || busy) return
+        setError(null)
+        try {
+          await onAnswer(message.callId, questions.map((question) => ({
+            id: question.id,
+            selected: selected[question.id] || [],
+          })))
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      return h('div', { className: 'pair-question' },
+        h('div', { className: 'pair-question-title' }, pending ? '需要你的回答' : '已回答'),
+        questions.map((question) => h('div', { key: question.id, className: 'pair-question-item' },
+          question.header ? h('div', { className: 'pair-question-header' }, question.header) : null,
+          h('div', { className: 'pair-question-text' }, question.question),
+          question.detail ? h('div', { className: 'pair-hint' }, question.detail) : null,
+          (question.options || []).length > 0
+            ? h('div', { className: 'pair-question-options' },
+              question.options.map((option) => h('button', {
+                key: option.label,
+                type: 'button',
+                className: 'pair-option',
+                'data-active': (selected[question.id] || []).includes(option.label) ? 'true' : 'false',
+                disabled: !pending || busy,
+                onClick: () => toggle(question, option.label),
+              },
+              h('span', { className: 'pair-option-label' }, option.label),
+              option.description ? h('span', { className: 'pair-option-desc' }, option.description) : null)))
+            : null)),
+        error ? h('div', { className: 'pair-error' }, error) : null,
+        pending
+          ? h('div', { className: 'pair-question-actions' },
+            h(Button, { kind: 'primary', size: 'sm', onClick: submit, disabled: !ready || busy },
+              busy ? '提交中…' : '提交回答'))
+          : null)
+    }
+
+    function MessageBubble({ message, onAnswer, answering }) {
       const role = message.role
+      if (role === 'question') {
+        return h(QuestionCard, { message, onAnswer, busy: answering })
+      }
       if (role === 'tool-image') {
         return h('div', { style: { alignSelf: 'flex-start', maxWidth: '88%' } },
           h(ImageGroup, { images: message.images }))
@@ -873,6 +988,8 @@ window.__ModuleLoader__.load({
       const [refreshedAt, setRefreshedAt] = React.useState(0)
       const [showTools, setShowTools] = React.useState(false)
       const [pending, setPending] = React.useState([])
+      const [answering, setAnswering] = React.useState(null)
+      const [showAll, setShowAll] = React.useState(false)
       const scrollRef = React.useRef(null)
       const stickToBottom = React.useRef(true)
       const fileRef = React.useRef(null)
@@ -913,11 +1030,12 @@ window.__ModuleLoader__.load({
         return () => clearInterval(timer)
       }, [loadMeta])
 
+      const lastSeq = messages.length ? messages[messages.length - 1].seq : 0
       React.useEffect(() => {
         const node = scrollRef.current
         if (!node || !stickToBottom.current) return
         node.scrollTop = node.scrollHeight
-      }, [messages])
+      }, [lastSeq])
 
       const pickModel = async (option) => {
         try {
@@ -1015,6 +1133,19 @@ window.__ModuleLoader__.load({
         setPending((prev) => prev.filter((item) => item.key !== key))
       }
 
+      const answerQuestion = async (callId, answers) => {
+        setAnswering(callId)
+        try {
+          await callJson(base, `/sessions/${encodeURIComponent(session.id)}/answer`, {
+            method: 'POST',
+            body: JSON.stringify({ callId, answers }),
+          })
+          await load()
+        } finally {
+          setAnswering(null)
+        }
+      }
+
       const stop = async () => {
         try {
           await callJson(base, `/sessions/${encodeURIComponent(session.id)}/cancel`, {
@@ -1089,9 +1220,28 @@ window.__ModuleLoader__.load({
         },
         messages.length === 0
           ? h(Empty, null, refreshedAt ? '这个会话还没有消息' : '正在读取…')
-          : messages
-            .filter((message) => showTools || message.role !== 'tool')
-            .map((message, index) => h(MessageBubble, { key: `${message.seq}-${index}`, message }))),
+          : (() => {
+            const filtered = messages.filter((message) => showTools || message.role !== 'tool')
+            const limit = showAll ? filtered.length : 24
+            const hidden = Math.max(0, filtered.length - limit)
+            const visible = hidden > 0 ? filtered.slice(hidden) : filtered
+            return [
+              hidden > 0
+                ? h('button', {
+                  key: '__more',
+                  type: 'button',
+                  className: 'pair-more',
+                  onClick: () => setShowAll(true),
+                }, `显示更早的 ${hidden} 条`)
+                : null,
+              visible.map((message, index) => h(MessageBubble, {
+                key: `seq-${message.seq}-${message.role}`,
+                message,
+                onAnswer: answerQuestion,
+                answering: answering === message.callId,
+              })),
+            ]
+          })()),
         pending.length > 0
           ? h('div', { className: 'pair-attach-row' },
             pending.map((item) => h('div', { key: item.key, className: 'pair-attach' },
@@ -1381,6 +1531,10 @@ window.__ModuleLoader__.load({
 
       const refreshNow = async () => {
         setRefreshing(true)
+        // 刷新顺手从 GitHub 同步一次端点，两个按钮合成一个
+        if (info && info.role !== 'host') {
+          try { await callJson('', '/dsh-pair/sync-endpoint', { method: 'POST' }) } catch { /* 同步失败也继续刷新 */ }
+        }
         await loadInfo()
         await loadTree()
         setRefreshing(false)
@@ -1457,8 +1611,13 @@ window.__ModuleLoader__.load({
           isHost
             ? (info.configured ? '作为主机等待手机' : '未配置配对密钥')
             : (treeError ? '连不上电脑' : '已连上电脑'))),
-        h(Button, { kind: 'ghost', size: 'sm', onClick: refreshNow, disabled: refreshing, title: '刷新' },
-          refreshing ? '刷新中' : '刷新'))
+        h(Button, {
+          kind: 'ghost',
+          size: 'sm',
+          onClick: refreshNow,
+          disabled: refreshing,
+          title: '刷新（手机端会先同步 GitHub 上的最新地址）',
+        }, refreshing ? '同步中' : '刷新'))
 
       const treePane = h('div', { className: 'pair-tree-pane' },
         showConfig

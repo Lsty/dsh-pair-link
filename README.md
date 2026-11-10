@@ -220,6 +220,12 @@ endpointUpdatedAt=2026-11-10T15:05:11.689Z  lastError=null
 config pairUrl = http://127.0.0.1:52716   （被 GitHub 端点覆盖）
 ```
 
+## 提问与审批
+
+- `ask_user_question` 的提问会渲染成卡片（问题、说明、选项），选完点「提交回答」，走 `POST /dsh-pair/api/sessions/:id/answer`（内部调 `userQuestions.answer`）
+- 审批请求通过 `approval/request`（root ctx + `prepend: true`）推给手机；**断线重连后 host 会把还没处理的审批补发一遍**（`{ type: 'approvals', items }`）
+- 消息列表默认只显示最近 24 条，更早的折叠成「显示更早的 N 条」
+
 ## 已知限制
 
 1. **专用隧道地址每次重启都会变**：`cloudflared` 的 `*.trycloudflare.com` 随进程重启变化。变了就到电脑端「远程电脑」面板顶部复制新地址，手机端「修改连接」里改一下，不用重装。

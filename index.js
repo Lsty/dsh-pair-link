@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.4'
+const VERSION = '0.4.5'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -235,7 +235,22 @@ function toDisplayMessage(event) {
     return { seq, time, role: 'tool-image', text: '', images, tool: data.message?.toolCallId ?? '' }
   }
   if (type === 'tool/call') {
-    return { seq, time, role: 'tool', text: String(event.data?.name ?? '工具') }
+    const data = event.data ?? {}
+    const name = String(data.name ?? '工具')
+    if (name === 'ask_user_question') {
+      const questions = parseAskQuestions(data.arguments)
+      if (questions.length > 0) {
+        return {
+          seq,
+          time,
+          role: 'question',
+          text: '',
+          callId: String(data.callId ?? ''),
+          questions,
+        }
+      }
+    }
+    return { seq, time, role: 'tool', text: name }
   }
   if (type === 'turn/end') {
     const kind = event.data?.reason?.kind
@@ -244,12 +259,47 @@ function toDisplayMessage(event) {
   return null
 }
 
+/** 解析 ask_user_question 工具参数里的问题列表（字符串或已解析对象都兼容）。 */
+function parseAskQuestions(raw) {
+  let parsed = raw
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      return []
+    }
+  }
+  if (!parsed || typeof parsed !== 'object') return []
+  const list = Array.isArray(parsed.questions) ? parsed.questions : []
+  return list
+    .filter((item) => item && typeof item.question === 'string')
+    .map((item) => ({
+      id: String(item.id ?? ''),
+      question: String(item.question ?? ''),
+      header: item.header ? String(item.header) : '',
+      detail: item.detail ? String(item.detail) : '',
+      multiSelect: Boolean(item.multiSelect),
+      options: (Array.isArray(item.options) ? item.options : [])
+        .filter((option) => option && typeof option.label === 'string')
+        .map((option) => ({
+          label: String(option.label),
+          description: option.description ? String(option.description) : '',
+        })),
+    }))
+}
+
 function compactMessages(rows) {
   const out = []
   for (const row of rows) {
     if (!row) continue
-    // 工具调用行只保留名字；没有文字/思考/图片的整条丢弃
-    if (row.role !== 'tool' && !row.text && !row.reasoning && !(row.images && row.images.length)) continue
+    // 工具调用行只保留名字；没有文字/思考/图片/提问的整条丢弃
+    if (
+      row.role !== 'tool'
+      && !row.text
+      && !row.reasoning
+      && !(row.images && row.images.length)
+      && !(row.questions && row.questions.length)
+    ) continue
     out.push(row)
   }
   return out
@@ -551,6 +601,21 @@ function applySessionApi(ctx, runtime) {
     }
 
     const messages = compactMessages(events.map(toDisplayMessage))
+
+    // 有 tool/result 的提问就是已经答过的，没有的才是待回答
+    const answered = new Set()
+    for (const event of events) {
+      if (event?.type === 'tool/result') {
+        const callId = event.data?.message?.toolCallId
+        if (callId) answered.add(String(callId))
+      }
+    }
+    for (const message of messages) {
+      if (message.role === 'question' && message.callId) {
+        message.pending = !answered.has(message.callId)
+      }
+    }
+
     await inlineImages(messages)
     return { messages, cursor }
   }
@@ -625,6 +690,37 @@ function applySessionApi(ctx, runtime) {
       session = store?.get?.(sessionId)
     }
     return session ?? null
+  }
+
+  async function ensureLiveAgent(sessionId) {
+    const agents = ctx.get?.('agents')
+    let agent = agents?.get?.(sessionId)
+    if (agent) return agent
+    const controller = controllerOf()
+    if (controller?.resolveAgent) {
+      try { await controller.resolveAgent(sessionId) } catch { /* ignore */ }
+      agent = agents?.get?.(sessionId)
+    }
+    return agent ?? null
+  }
+
+  /** 回答 ask_user_question：把选中的选项交回提问服务。 */
+  async function answerQuestion(sessionId, callId, answers) {
+    const userQuestions = ctx.get?.('userQuestions')
+    if (!userQuestions?.answer) throw new Error('这个 DSH 版本没有提问服务')
+    if (!callId) throw new Error('缺少 callId')
+    const agent = await ensureLiveAgent(sessionId)
+    if (!agent) throw new Error('会话没有加载，暂时不能回答')
+    const list = Array.isArray(answers) ? answers : []
+    if (list.length === 0) throw new Error('没有回答内容')
+    const accepted = userQuestions.answer(agent, callId, {
+      answers: list.map((item) => ({
+        id: String(item?.id ?? ''),
+        selected: Array.isArray(item?.selected) ? item.selected.map(String) : [],
+        ...(item?.custom ? { custom: String(item.custom) } : {}),
+      })),
+    })
+    return { accepted: Boolean(accepted) }
   }
 
   /** 工作区树：工作区（按注册顺序）→ 会话列表。 */
@@ -739,6 +835,7 @@ function applySessionApi(ctx, runtime) {
     promptSession,
     cancelSession,
     uploadToSession,
+    answerQuestion,
     buildTree,
     sessionMeta,
     setSessionModel,
@@ -862,6 +959,15 @@ function applyHostRoutes(ctx, runtime, sessions) {
           let body
           try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
           const result = await sessions.uploadToSession(sessionId, body)
+          sendJson(res, 200, { ok: true, ...result })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'answer') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
+          const result = await sessions.answerQuestion(sessionId, String(body?.callId ?? ''), body?.answers)
           sendJson(res, 200, { ok: true, ...result })
           return
         }
@@ -1289,19 +1395,28 @@ function startPairing(ctx, runtime) {
     ctx.logger?.info?.('dsh-pair-link: connected to host %s', runtime.remote?.httpOrigin ?? '?')
   })
 
+  const queueApproval = (message) => {
+    runtime.approvalsSeen += 1
+    runtime.approvals.set(String(message.id), {
+      resolve: (outcome) => {
+        try { socket.send(JSON.stringify({ type: 'approval-decision', id: message.id, outcome })) } catch { /* ignore */ }
+        runtime.approvals.delete(String(message.id))
+      },
+      info: message,
+    })
+    ctx.logger?.info?.('dsh-pair-link: approval %s (%s) queued', message.id, message.toolName)
+  }
+
   socket.addEventListener('message', (event) => {
     let message
     try { message = JSON.parse(String(event.data)) } catch { return }
     if (message?.type === 'approval') {
-      runtime.approvalsSeen += 1
-      runtime.approvals.set(String(message.id), {
-        resolve: (outcome) => {
-          try { socket.send(JSON.stringify({ type: 'approval-decision', id: message.id, outcome })) } catch { /* ignore */ }
-          runtime.approvals.delete(String(message.id))
-        },
-        info: message,
-      })
-      ctx.logger?.info?.('dsh-pair-link: approval %s (%s) queued', message.id, message.toolName)
+      queueApproval(message)
+    } else if (message?.type === 'approvals' && Array.isArray(message.items)) {
+      for (const item of message.items) {
+        if (!item || item.id === undefined) continue
+        if (!runtime.approvals.has(String(item.id))) queueApproval(item)
+      }
     } else if (message?.type === 'approval-resolved' || message?.type === 'approval-delegated') {
       runtime.approvals.delete(String(message.id))
     }
@@ -1832,6 +1947,11 @@ function applyPairingServer(ctx, runtime) {
       })
 
       peer.send(JSON.stringify({ type: 'hello', role: 'host', version: VERSION, at: Date.now() }))
+      // 断线重连后把还没处理的审批补发一遍，否则手机端永远看不到
+      if (runtime.approvals.size > 0) {
+        const items = [...runtime.approvals.entries()].map(([id, entry]) => ({ id, ...entry.info }))
+        peer.send(JSON.stringify({ type: 'approvals', items }))
+      }
     },
   }))
 
