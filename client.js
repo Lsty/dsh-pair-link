@@ -913,13 +913,14 @@ window.__ModuleLoader__.load({
         }))
     }
 
-    function QuestionCard({ message, onAnswer, busy }) {
+    function QuestionCard({ message, onAnswer, busy, readOnly = false }) {
       const questions = Array.isArray(message.questions) ? message.questions : []
       const [selected, setSelected] = React.useState({})
       const [custom, setCustom] = React.useState({})
       const [error, setError] = React.useState(null)
       const [submitted, setSubmitted] = React.useState(false)
-      const pending = message.pending !== false && !submitted
+      const showPending = message.pending !== false
+      const pending = showPending && !submitted && !readOnly
 
       const toggle = (question, label) => {
         if (!pending) return
@@ -956,7 +957,10 @@ window.__ModuleLoader__.load({
       }
 
       return h('div', { className: 'pair-question' },
-        h('div', { className: 'pair-question-title' }, pending ? '需要你的回答' : '已回答'),
+        h('div', { className: 'pair-question-title' },
+          showPending
+            ? (readOnly ? '需要你的回答（在下方浮层作答）' : '需要你的回答')
+            : '已回答'),
         questions.map((question) => h('div', { key: question.id, className: 'pair-question-item' },
           question.header ? h('div', { className: 'pair-question-header' }, question.header) : null,
           h('div', { className: 'pair-question-text' }, question.question),
@@ -998,7 +1002,7 @@ window.__ModuleLoader__.load({
     function MessageBubble({ message, onAnswer, answering }) {
       const role = message.role
       if (role === 'question') {
-        return h(QuestionCard, { message, onAnswer, busy: answering })
+        return h(QuestionCard, { message, onAnswer, busy: answering, readOnly: true })
       }
       if (role === 'tool-image') {
         return h('div', { style: { alignSelf: 'flex-start', maxWidth: '88%' } },
@@ -1822,6 +1826,62 @@ window.__ModuleLoader__.load({
     }
 
     // -----------------------------------------------------------------------
+    // 提问浮层：ask_user_question 走 user-questions/request，必须在这里回答
+    // -----------------------------------------------------------------------
+    function QuestionOverlay() {
+      const [items, setItems] = React.useState([])
+      const [busy, setBusy] = React.useState(null)
+
+      React.useEffect(() => {
+        let alive = true
+        let timer = null
+        const tick = async () => {
+          try {
+            const body = await callJson('', '/dsh-pair/inbox')
+            if (alive) setItems(Array.isArray(body.questions) ? body.questions : [])
+          } catch {
+            if (alive) setItems([])
+          }
+          if (alive) timer = setTimeout(tick, 2000)
+        }
+        tick()
+        return () => { alive = false; if (timer) clearTimeout(timer) }
+      }, [])
+
+      const submit = async (id, answers) => {
+        setBusy(id)
+        try {
+          await callJson('', '/dsh-pair/answer-question', {
+            method: 'POST',
+            body: JSON.stringify({ id, answers }),
+          })
+          setItems((prev) => prev.filter((item) => item.id !== id))
+        } catch {
+          /* 下一轮轮询会纠正 */
+        } finally {
+          setBusy(null)
+        }
+      }
+
+      if (!items.length) return null
+
+      return h('div', {
+        style: {
+          position: 'fixed', right: 12, bottom: 12, zIndex: 9999,
+          display: 'flex', flexDirection: 'column', gap: 8,
+          maxWidth: 'min(94vw, 440px)', maxHeight: '80vh', overflowY: 'auto',
+        },
+      },
+      h(StyleSheet),
+      items.map((item) => h(QuestionCard, {
+        key: item.id,
+        message: { callId: item.callId, questions: item.questions, pending: true },
+        busy: busy === item.id,
+        onAnswer: (callId, answers) => submit(item.id, answers),
+      })))
+    }
+
+    // -----------------------------------------------------------------------
     // 审批浮层
     // -----------------------------------------------------------------------
     function ApprovalOverlay() {
@@ -1994,6 +2054,13 @@ window.__ModuleLoader__.load({
           order: 60,
           label: 'DSH 配对',
         }, PairSettings))
+
+        // 提问浮层（user-questions/request 必须在浮层里回答）
+        ctx.slots.inject('shell.overlay', () => ctx.slots.register({
+          name: 'shell.overlay',
+          id: 'dsh-pair-question',
+          order: 90,
+        }, QuestionOverlay))
 
         // 审批浮层
         ctx.slots.inject('shell.overlay', () => ctx.slots.register({

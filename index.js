@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.9'
+const VERSION = '0.4.10'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -459,6 +459,10 @@ function createRuntime(ctx, config, disk) {
     // host 侧
     clients: new Set(),
     approvals: new Map(),
+    questions: new Map(),
+    questionsSeen: 0,
+    questionsAnswered: 0,
+    questionsDelegated: 0,
     connections: 0,
     approvalsSeen: 0,
     approvalsAnswered: 0,
@@ -1310,6 +1314,15 @@ function applyHostRoutes(ctx, runtime, sessions) {
       host: runtime.remote?.httpOrigin ?? '',
       configured: Boolean(runtime.remote),
       approvals: [...runtime.approvals.entries()].map(([id, entry]) => ({ id, ...entry.info })),
+      questions: [...runtime.questions.entries()].map(([id, entry]) => ({
+        id,
+        callId: entry.callId ?? null,
+        questions: entry.questions,
+        at: entry.at ?? Date.now(),
+      })),
+      questionsSeen: runtime.questionsSeen,
+      questionsAnswered: runtime.questionsAnswered,
+      questionsDelegated: runtime.questionsDelegated,
       approvalsSeen: runtime.approvalsSeen,
       approvalsAnswered: runtime.approvalsAnswered,
       approvalsDelegated: runtime.approvalsDelegated,
@@ -1317,6 +1330,35 @@ function applyHostRoutes(ctx, runtime, sessions) {
       clients: runtime.clients.size,
       now: Date.now(),
     })
+  })
+
+  // --- 手机端回答问题（浮层） ---
+  route('exact', '/dsh-pair/answer-question', async (req, res) => {
+    cors(res)
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+      return sendJson(res, 403, { ok: false, error: 'bad page token' })
+    }
+    const raw = await readBody(req)
+    let body
+    try { body = JSON.parse(raw) } catch { return sendJson(res, 400, { ok: false, error: 'bad json' }) }
+    const id = String(body?.id ?? '')
+    if (!id) return sendJson(res, 400, { ok: false, error: 'missing id' })
+    if (!runtime.socket || !runtime.connected) {
+      return sendJson(res, 409, { ok: false, error: 'not connected to host' })
+    }
+    try {
+      runtime.socket.send(JSON.stringify({
+        type: 'question-answer',
+        id,
+        answers: Array.isArray(body?.answers) ? body.answers : [],
+      }))
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
+    }
+    runtime.questions.delete(id)
+    runtime.questionsAnswered += 1
+    return sendJson(res, 200, { ok: true })
   })
 
   route('exact', '/dsh-pair/decide', async (req, res) => {
@@ -1443,6 +1485,16 @@ function startPairing(ctx, runtime) {
       }
     } else if (message?.type === 'approval-resolved' || message?.type === 'approval-delegated') {
       runtime.approvals.delete(String(message.id))
+    } else if (message?.type === 'question') {
+      runtime.questionsSeen += 1
+      runtime.questions.set(String(message.id), {
+        questions: Array.isArray(message.questions) ? message.questions : [],
+        callId: message.callId ?? null,
+        at: message.at ?? Date.now(),
+      })
+      ctx.logger?.info?.('dsh-pair-link: question %s queued', message.id)
+    } else if (message?.type === 'question-resolved' || message?.type === 'question-delegated') {
+      runtime.questions.delete(String(message.id))
     }
   })
 
@@ -2055,6 +2107,10 @@ function applyPairingServer(ctx, runtime) {
         let message
         try { message = JSON.parse(text) } catch { return }
         if (message?.type === 'approval-decision') runtime.decide(String(message.id ?? ''), message.outcome)
+        if (message?.type === 'question-answer') {
+          const entry = runtime.questions.get(String(message.id ?? ''))
+          if (entry) entry.resolve({ answers: Array.isArray(message.answers) ? message.answers : [] })
+        }
       })
 
       peer.send(JSON.stringify({ type: 'hello', role: 'host', version: VERSION, at: Date.now() }))
@@ -2070,6 +2126,89 @@ function applyPairingServer(ctx, runtime) {
     for (const client of runtime.clients) client.close()
     runtime.clients.clear()
     runtime.approvals.clear()
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 提问桥：用户提问走 user-questions/request waterfall
+// ---------------------------------------------------------------------------
+function normalizeQuestions(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((item) => item && typeof item.question === 'string')
+    .map((item) => ({
+      id: String(item.id ?? ''),
+      question: String(item.question ?? ''),
+      header: item.header ? String(item.header) : '',
+      detail: item.detail ? String(item.detail) : '',
+      multiSelect: Boolean(item.multiSelect),
+      options: (Array.isArray(item.options) ? item.options : [])
+        .filter((option) => option && typeof option.label === 'string')
+        .map((option) => ({
+          label: String(option.label),
+          description: option.description ? String(option.description) : '',
+        })),
+    }))
+}
+
+function applyQuestionBridge(ctx, runtime) {
+  const handler = async (request, next) => {
+    if (runtime.stopped) return next()
+    if (runtime.clients.size === 0) return next()
+    const questions = normalizeQuestions(request?.questions)
+    if (questions.length === 0) return next()
+
+    runtime.questionsSeen += 1
+    const id = randomUUID()
+    const callId = request?.wait?.callId ? String(request.wait.callId) : null
+    const at = Date.now()
+
+    const answer = new Promise((resolve) => {
+      runtime.questions.set(id, { resolve, request, questions, callId, at })
+      runtime.broadcast({ type: 'question', id, callId, questions, at })
+    })
+
+    let timer
+    const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), 180_000) })
+    let onAbort = null
+    const aborted = new Promise((resolve) => {
+      if (!request?.signal) return
+      if (request.signal.aborted) return resolve(null)
+      onAbort = () => resolve(null)
+      request.signal.addEventListener('abort', onAbort, { once: true })
+    })
+
+    const result = await Promise.race([answer, timeout, aborted])
+    clearTimeout(timer)
+    if (onAbort && request?.signal) request.signal.removeEventListener('abort', onAbort)
+    runtime.questions.delete(id)
+
+    if (result && Array.isArray(result.answers) && result.answers.length > 0) {
+      runtime.questionsAnswered += 1
+      runtime.broadcast({ type: 'question-resolved', id })
+      return { answers: result.answers }
+    }
+    runtime.questionsDelegated += 1
+    runtime.broadcast({ type: 'question-delegated', id })
+    return next()
+  }
+
+  ctx.effect(() => {
+    try {
+      const rootCtx = ctx.root ?? ctx
+      const off = rootCtx.on('user-questions/request', handler, { prepend: true })
+      ctx.logger?.info?.('dsh-pair-link: question bridge attached at root')
+      return () => { try { off() } catch { /* ignore */ } }
+    } catch (err) {
+      ctx.logger?.warn?.('dsh-pair-link: question bridge attach failed: %s', err?.message ?? err)
+      return undefined
+    }
+  })
+
+  ctx.effect(() => () => {
+    for (const [, entry] of runtime.questions) {
+      try { entry.resolve(null) } catch { /* ignore */ }
+    }
+    runtime.questions.clear()
   })
 }
 
@@ -2173,6 +2312,7 @@ export function apply(ctx, config) {
   applyProxy(ctx, runtime)
   applyPairingServer(ctx, runtime)
   applyApprovalBridge(ctx, runtime)
+  applyQuestionBridge(ctx, runtime)
 
   // client 模式：先问 GitHub 要最新端点，失败再退回配置里的地址
   if (runtime.remote) void bootstrapEndpoint(ctx, runtime)
