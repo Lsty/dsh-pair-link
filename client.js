@@ -105,11 +105,25 @@ window.__ModuleLoader__.load({
       )))
     }
 
+    // 把 wss://host/dsh-pair/ws 推导成 https://host/
+    function toDesktopUrl(host) {
+      if (typeof host !== 'string' || host.length === 0) return null
+      try {
+        const u = new URL(host)
+        u.protocol = u.protocol === 'wss:' ? 'https:' : 'http:'
+        return u.origin + '/'
+      } catch {
+        return null
+      }
+    }
+
     function PairSettings() {
       const [data, setData] = React.useState(null)
       const [err, setErr] = React.useState(null)
+      const [mirror, setMirror] = React.useState(false)
       const token = typeof window !== 'undefined' ? window.__DSH_PAIR_TOKEN__ : ''
       const authHeaders = token ? { 'x-pair-token': token } : {}
+      const desktopUrl = toDesktopUrl(data?.host ?? '')
 
       React.useEffect(() => {
         let alive = true
@@ -148,6 +162,38 @@ window.__ModuleLoader__.load({
       h('span', { style: { textAlign: 'right', wordBreak: 'break-all', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' } }, String(v)))
 
       return h('div', { style: { padding: '4px 2px', fontSize: 13, lineHeight: 1.6 } },
+        desktopUrl
+          ? h('button', {
+            type: 'button',
+            onClick: () => setMirror(true),
+            style: {
+              width: '100%', padding: '10px 12px', marginBottom: 14, borderRadius: 10,
+              border: 'none', background: accent, color: '#fff', fontWeight: 600,
+              fontSize: 14, cursor: 'pointer',
+            },
+          }, '打开电脑桌面')
+          : null,
+
+        mirror && desktopUrl
+          ? h('iframe', {
+            src: desktopUrl,
+            title: '电脑 DSH',
+            style: { position: 'fixed', inset: 0, width: '100vw', height: '100vh', border: 0, background: '#fff', zIndex: 99998 },
+          })
+          : null,
+        mirror
+          ? h('button', {
+            type: 'button',
+            onClick: () => setMirror(false),
+            style: {
+              position: 'fixed', right: 14, top: 14, zIndex: 99999,
+              padding: '7px 14px', borderRadius: 999, border: 'none',
+              background: 'rgba(0,0,0,0.72)', color: '#fff', fontSize: 13,
+              fontWeight: 600, cursor: 'pointer', backdropFilter: 'blur(6px)',
+            },
+          }, '✕ 关闭')
+          : null,
+
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 } },
           h('span', { style: { width: 9, height: 9, borderRadius: 999, background: dot, display: 'inline-block', boxShadow: connected ? '0 0 8px ' + dot : 'none' } }),
           h('strong', null, connected ? '已连接' : '未连接'),
