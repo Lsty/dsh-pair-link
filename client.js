@@ -528,6 +528,65 @@ window.__ModuleLoader__.load({
     }
 
     // -----------------------------------------------------------------------
+    // 手机连接地址（电脑端专用隧道）
+    // -----------------------------------------------------------------------
+    function TunnelCard({ info }) {
+      const [copied, setCopied] = React.useState(false)
+      const url = info && info.publicUrl ? info.publicUrl : ''
+      const state = (info && info.tunnelState) || 'off'
+      const tone = state === 'ready' ? 'ok' : state === 'starting' ? 'warn' : state === 'error' ? 'error' : 'idle'
+      const stateText = state === 'ready'
+        ? '已就绪'
+        : state === 'starting'
+          ? '正在获取…'
+          : state === 'error'
+            ? '获取失败'
+            : '未启动'
+
+      const copy = async () => {
+        if (!url) return
+        try {
+          await navigator.clipboard.writeText(url)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 2000)
+        } catch {
+          if (typeof window !== 'undefined' && window.prompt) window.prompt('复制这个地址：', url)
+        }
+      }
+
+      return h(Card, { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h(Dot, { tone }),
+          h('strong', { style: { fontSize: 13 } }, '手机连接地址'),
+          h('span', {
+            style: {
+              marginLeft: 'auto', fontSize: 11.5,
+              color: 'var(--dsw-alias-label-secondary)',
+            },
+          }, stateText)),
+        url
+          ? h('div', { style: { display: 'flex', gap: 8, alignItems: 'center' } },
+            h('code', {
+              style: {
+                flex: 1, minWidth: 0, padding: '8px 10px', borderRadius: 8,
+                background: 'var(--dsw-alias-bg-base)',
+                border: '1px solid var(--dsw-alias-border-l1)',
+                fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              },
+            }, url),
+            h(Button, { onClick: copy, style: { flex: '0 0 auto' } }, copied ? '已复制' : '复制'))
+          : null,
+        !url && state !== 'starting'
+          ? h('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6 } },
+            info && info.tunnelError
+              ? `没拿到地址：${info.tunnelError}`
+              : '没拿到公网地址，检查 cloudflared 是否安装、网络是否放行。')
+          : null,
+        h('div', { style: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.65 } },
+          '手机端「连接电脑」填这个地址 + 配对密钥，不需要访问密码。重启 DSH 后地址会变，回到这里复制新的。'))
+    }
+
+    // -----------------------------------------------------------------------
     // 主面板
     // -----------------------------------------------------------------------
     function PairPage() {
@@ -653,6 +712,7 @@ window.__ModuleLoader__.load({
             h(Button, { onClick: () => setShowConfig(false) }, '取消'))
         }
         return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 8, flex: 1, minHeight: 0 } },
+          isHost ? h(TunnelCard, { info }) : null,
           listError
             ? h('div', {
               style: {

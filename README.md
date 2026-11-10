@@ -60,6 +60,10 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 { "secret": "至少 32 位随机字符串" }
 ```
 
+电脑端默认会**自己起一条 cloudflared 专用隧道**（`autoTunnel`，默认开），把当前公网地址显示在「远程电脑」面板顶部，复制给手机端即可。这条隧道直连本机 DSH，**不经过 dsh-bridge 之类的登录墙**，所以手机端只需要地址 + 配对密钥。
+
+关闭自动隧道：配置 `"autoTunnel": false`。
+
 ### 手机端
 
 在「远程电脑」面板里点「连接电脑」填即可（会写回 `~/.dsh/dsh-pair-link.json`）：
@@ -67,7 +71,7 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 ```json
 {
   "secret": "与电脑端同一个值",
-  "pairUrl": "https://<隧道域名>",
+  "pairUrl": "https://<电脑端面板显示的公网地址>",
   "bridgeToken": "（可选）电脑前面那个远程访问插件的免密令牌",
   "bridgePassword": "（可选）电脑前面那个远程访问插件的访问密码"
 }
@@ -130,7 +134,7 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 
 ## 已知限制
 
-1. **隧道地址每次重启都会变**：`cloudflared` 的 `*.trycloudflare.com` 随进程重启变化。变了就在手机端「修改连接」里改 `pairUrl`，不用重装。
+1. **专用隧道地址每次重启都会变**：`cloudflared` 的 `*.trycloudflare.com` 随进程重启变化。变了就到电脑端「远程电脑」面板顶部复制新地址，手机端「修改连接」里改一下，不用重装。
 2. **电脑前面若挡着远程访问插件**（如 dsh-bridge），它会对未认证请求返回 401。在手机端「修改连接」里填它的**访问密码**（推荐，插件会自己登录换会话）或免密令牌；两者都不填就会看到 401 提示。
 3. **审批桥是附加能力**：`approval/request` 只有在 DSH 真正发起审批时才有回调（工具进入询问模式）。面板里的「发送 / 停止 / 读消息」不依赖它。
 4. **消息按事件分页**：`limit` 是页大小，工具调用也算一条。页面默认折叠工具行，用「工具」按钮展开。

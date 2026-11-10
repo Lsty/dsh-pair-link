@@ -14,6 +14,7 @@ import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypt
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { join } from 'node:path'
+import { spawn } from 'node:child_process'
 
 export const name = 'dsh-pair-link'
 
@@ -323,6 +324,13 @@ function createRuntime(ctx, config, disk) {
     // 电脑前面的远程访问插件（dsh-bridge 等）的访问密码：手机端服务端自己登录换 cookie
     bridgePassword: String(config?.bridgePassword ?? '') || String(disk.bridgePassword ?? ''),
     bridgeCookie: '',
+    // 专用隧道：电脑端自己起一条 cloudflared，页面直接显示地址给手机端填
+    autoTunnel: (config?.autoTunnel ?? disk.autoTunnel ?? true) !== false,
+    cloudflaredPath: String(config?.cloudflaredPath ?? '') || String(disk.cloudflaredPath ?? '') || 'cloudflared',
+    publicUrl: '',
+    tunnelState: 'off',
+    tunnelError: null,
+    tunnel: null,
     // host 侧
     clients: new Set(),
     approvals: new Map(),
@@ -609,6 +617,9 @@ function applyHostRoutes(ctx, runtime, sessions) {
       reconnects: runtime.reconnects,
       clients: runtime.clients.size,
       device: hostname(),
+      publicUrl: runtime.publicUrl,
+      tunnelState: runtime.tunnelState,
+      tunnelError: runtime.tunnelError,
     })
   })
 
@@ -850,6 +861,86 @@ function scheduleReconnect(ctx, runtime) {
     runtime.reconnectTimer = null
     startPairing(ctx, runtime)
   }, RECONNECT_MS)
+}
+
+// ---------------------------------------------------------------------------
+// 专用隧道：电脑端自己起一条 cloudflared，把地址显示给手机端
+// ---------------------------------------------------------------------------
+function startQuickTunnel(ctx, runtime) {
+  if (!runtime.autoTunnel || runtime.tunnel || runtime.stopped) return
+  if (runtime.remote) return // 已是对端（手机），不需要再暴露自己
+  if (process.platform === 'android' || process.platform === 'ios') return
+
+  let origin
+  try {
+    origin = ctx.webServer.getOrigin()
+  } catch {
+    return
+  }
+
+  let child
+  try {
+    child = spawn(runtime.cloudflaredPath, ['tunnel', '--url', origin, '--no-autoupdate'], {
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (err) {
+    runtime.tunnelState = 'error'
+    runtime.tunnelError = String(err?.message ?? err)
+    ctx.logger?.warn?.('dsh-pair-link: 专用隧道启动失败：%s', runtime.tunnelError)
+    return
+  }
+
+  runtime.tunnel = child
+  runtime.tunnelState = 'starting'
+  runtime.tunnelError = null
+  let settled = false
+
+  const scan = (chunk) => {
+    const text = String(chunk)
+    const match = /https:\/\/[a-z0-9-]+\.trycloudflare\.com/.exec(text)
+    if (match && !settled) {
+      settled = true
+      runtime.publicUrl = match[0]
+      runtime.tunnelState = 'ready'
+      if (runtime.tunnelTimer) { clearTimeout(runtime.tunnelTimer); runtime.tunnelTimer = null }
+      ctx.logger?.info?.('dsh-pair-link: 专用隧道就绪 %s', runtime.publicUrl)
+    }
+    if (!settled && /failed to|unauthorized|error/i.test(text)) {
+      runtime.tunnelError = text.trim().slice(0, 240)
+    }
+  }
+  child.stdout?.on('data', scan)
+  child.stderr?.on('data', scan)
+  child.on('error', (err) => {
+    runtime.tunnelState = 'error'
+    runtime.tunnelError = String(err?.message ?? err)
+  })
+  child.on('exit', (code) => {
+    if (runtime.tunnel === child) runtime.tunnel = null
+    if (runtime.tunnelState !== 'error') runtime.tunnelState = 'stopped'
+    ctx.logger?.warn?.('dsh-pair-link: 专用隧道退出（code=%s）', code)
+  })
+
+  runtime.tunnelTimer = setTimeout(() => {
+    if (!settled && runtime.tunnelState === 'starting') {
+      runtime.tunnelState = 'error'
+      runtime.tunnelError = '45 秒内没有拿到公网地址（cloudflared 可能被墙或未安装）'
+    }
+  }, 45_000)
+}
+
+function stopTunnel(runtime) {
+  if (runtime.tunnelTimer) {
+    clearTimeout(runtime.tunnelTimer)
+    runtime.tunnelTimer = null
+  }
+  const child = runtime.tunnel
+  runtime.tunnel = null
+  runtime.tunnelState = 'off'
+  runtime.publicUrl = ''
+  if (!child) return
+  try { child.kill() } catch { /* ignore */ }
 }
 
 /** 电脑前面有 dsh-bridge 之类的登录墙时，用访问密码换一个会话 cookie。 */
@@ -1124,9 +1215,14 @@ export function apply(ctx, config) {
 
   if (runtime.remote) startPairing(ctx, runtime)
 
+  // 等 webServer 完成监听再起隧道
+  const bootTimer = setTimeout(() => startQuickTunnel(ctx, runtime), 1200)
+
   ctx.effect(() => () => {
     runtime.stopped = true
+    clearTimeout(bootTimer)
     stopPairing(runtime)
+    stopTunnel(runtime)
   })
 
   if (!runtime.secret) ctx.logger?.warn?.('dsh-pair-link: 未配置 secret，配对与远程 API 会拒绝所有连接')
