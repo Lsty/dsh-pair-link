@@ -1437,17 +1437,18 @@ window.__ModuleLoader__.load({
           ? h(Empty, null, refreshedAt ? '这个会话还没有消息' : '正在读取…')
           : (() => {
             const filtered = messages.filter((message) => showTools || message.role !== 'tool')
-            const limit = showAll ? filtered.length : 24
-            const hidden = Math.max(0, filtered.length - limit)
-            const visible = hidden > 0 ? filtered.slice(hidden) : filtered
+            const LIMIT = 24
+            const collapsible = filtered.length > LIMIT
+            const hidden = Math.max(0, filtered.length - LIMIT)
+            const visible = (showAll || !collapsible) ? filtered : filtered.slice(filtered.length - LIMIT)
             return [
-              hidden > 0
+              collapsible
                 ? h('button', {
                   key: '__more',
                   type: 'button',
                   className: 'pair-more',
-                  onClick: () => setShowAll(true),
-                }, `显示更早的 ${hidden} 条`)
+                  onClick: () => setShowAll((value) => !value),
+                }, showAll ? '收起，只看最近 24 条' : `显示更早的 ${hidden} 条`)
                 : null,
               visible.map((message, index) => h(MessageBubble, {
                 key: `seq-${message.seq}-${message.role}`,
