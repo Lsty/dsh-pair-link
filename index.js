@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.3'
+const VERSION = '0.4.4'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -397,6 +397,11 @@ function createRuntime(ctx, config, disk) {
     publishStatus: '',
     publishError: null,
     signingKey: null,
+    // 端点来源：client 启动时先问 GitHub，失败再退回配置文件
+    endpointSource: 'config',
+    endpointUpdatedAt: null,
+    fallbackRemote: null,
+    fallbackTimer: null,
     // host 侧
     clients: new Set(),
     approvals: new Map(),
@@ -930,6 +935,8 @@ function applyHostRoutes(ctx, runtime, sessions) {
       publishRepo: runtime.publishRepo,
       publishStatus: runtime.publishStatus,
       publishError: runtime.publishError,
+      endpointSource: runtime.endpointSource,
+      endpointUpdatedAt: runtime.endpointUpdatedAt,
     })
   })
 
@@ -1134,6 +1141,9 @@ function applyHostRoutes(ctx, runtime, sessions) {
       apiCalls: runtime.apiCalls,
       connected: runtime.connected,
       reconnects: runtime.reconnects,
+      endpointSource: runtime.endpointSource,
+      endpointUpdatedAt: runtime.endpointUpdatedAt,
+      lastError: runtime.lastError,
       now: Date.now(),
     })
   })
@@ -1219,6 +1229,10 @@ function stopPairing(runtime) {
     clearTimeout(runtime.reconnectTimer)
     runtime.reconnectTimer = null
   }
+  if (runtime.fallbackTimer) {
+    clearTimeout(runtime.fallbackTimer)
+    runtime.fallbackTimer = null
+  }
   const socket = runtime.socket
   runtime.socket = null
   runtime.connected = false
@@ -1267,6 +1281,11 @@ function startPairing(ctx, runtime) {
   socket.addEventListener('open', () => {
     runtime.connected = true
     runtime.lastError = null
+    if (runtime.fallbackTimer) {
+      clearTimeout(runtime.fallbackTimer)
+      runtime.fallbackTimer = null
+    }
+    runtime.fallbackRemote = null
     ctx.logger?.info?.('dsh-pair-link: connected to host %s', runtime.remote?.httpOrigin ?? '?')
   })
 
@@ -1550,12 +1569,13 @@ async function publishEndpoint(runtime) {
   runtime.publishError = null
 }
 
-async function syncEndpoint(ctx, runtime) {
-  if (!runtime.publishRepo) throw new Error('还没有配置地址仓库')
-  const api = `https://api.github.com/repos/${runtime.publishRepo}/contents/${runtime.publishPath}`
+async function fetchEndpointFromGitHub(runtime) {
+  const repo = runtime.publishRepo || 'Lsty/dsh-pair-link'
+  const path = runtime.publishPath || 'endpoint.json'
+  const api = `https://api.github.com/repos/${repo}/contents/${path}?ref=main`
   const res = await fetch(api, {
     headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-pair-link' },
-    signal: AbortSignal.timeout(10_000),
+    signal: AbortSignal.timeout(8000),
   })
   if (!res.ok) throw new Error(`读 GitHub 失败：HTTP ${res.status}`)
   const json = await res.json()
@@ -1565,42 +1585,92 @@ async function syncEndpoint(ctx, runtime) {
   } catch {
     throw new Error('地址文件不是合法 JSON')
   }
-  const device = endpoint?.device
-  const url = endpoint?.url
-  const ts = endpoint?.ts
-  const publicKey = endpoint?.publicKey
-  const sig = endpoint?.sig
-  if (!url || !publicKey || !sig || !ts) throw new Error('地址文件缺字段')
+  if (!endpoint || typeof endpoint.url !== 'string' || endpoint.url.length === 0) {
+    throw new Error('地址文件缺少 url')
+  }
+  // 旧文件可能没有签名字段；有就必须验过
+  if (endpoint.publicKey && endpoint.sig && endpoint.ts !== undefined) {
+    let ok = false
+    try {
+      ok = verify(
+        null,
+        Buffer.from(endpointPayload(endpoint.device, endpoint.url, endpoint.ts)),
+        createPublicKey(endpoint.publicKey),
+        Buffer.from(String(endpoint.sig), 'base64'),
+      )
+    } catch {
+      ok = false
+    }
+    if (!ok) throw new Error('签名校验失败，地址可能被改过')
+    if (runtime.publishPublicKey && runtime.publishPublicKey !== endpoint.publicKey) {
+      throw new Error('公钥和上次记录的不一致，拒绝使用')
+    }
+    if (!runtime.publishPublicKey) {
+      runtime.publishPublicKey = endpoint.publicKey
+      try { writeDiskConfig({ publishPublicKey: endpoint.publicKey }) } catch { /* ignore */ }
+    }
+  }
+  return endpoint
+}
 
-  let ok = false
+function endpointStamp(endpoint) {
+  const ts = Number(endpoint?.ts)
+  return Number.isFinite(ts) && ts > 0 ? new Date(ts).toISOString() : new Date().toISOString()
+}
+
+/** client 启动时先问 GitHub，失败就沿用配置文件里的地址，并把原因记进 lastError。 */
+async function bootstrapEndpoint(ctx, runtime) {
+  const previous = runtime.remote
   try {
-    ok = verify(
-      null,
-      Buffer.from(endpointPayload(device, url, ts)),
-      createPublicKey(publicKey),
-      Buffer.from(String(sig), 'base64'),
-    )
-  } catch {
-    ok = false
+    const endpoint = await fetchEndpointFromGitHub(runtime)
+    const next = resolveRemote(endpoint.url, runtime.remote?.bridgeToken ?? '')
+    if (!next) throw new Error('GitHub 上的地址无法解析')
+    const changed = next.httpOrigin !== (previous?.httpOrigin ?? '')
+    runtime.remote = next
+    runtime.endpointSource = 'github'
+    runtime.endpointUpdatedAt = endpointStamp(endpoint)
+    runtime.lastError = null
+    if (changed) {
+      try { writeDiskConfig({ pairUrl: endpoint.url }) } catch (err) {
+        ctx.logger?.warn?.('dsh-pair-link: 写入新 pairUrl 失败：%s', err?.message ?? err)
+      }
+      // 新地址连不上就退回配置里的旧地址，不让手机卡死在一个失效端点上
+      runtime.fallbackRemote = previous
+      if (runtime.fallbackTimer) clearTimeout(runtime.fallbackTimer)
+      runtime.fallbackTimer = setTimeout(() => {
+        runtime.fallbackTimer = null
+        if (runtime.connected || runtime.endpointSource !== 'github') return
+        if (!runtime.fallbackRemote) return
+        runtime.remote = runtime.fallbackRemote
+        runtime.fallbackRemote = null
+        runtime.endpointSource = 'config'
+        runtime.lastError = `GitHub 地址连不上，已回退到配置地址 ${runtime.remote.httpOrigin}`
+        ctx.logger?.warn?.('dsh-pair-link: %s', runtime.lastError)
+        restartPairing(ctx, runtime)
+      }, 12_000)
+    }
+    ctx.logger?.info?.('dsh-pair-link: 端点来自 GitHub %s（%s）', endpoint.url, changed ? '已更新' : '未变化')
+  } catch (err) {
+    runtime.endpointSource = 'config'
+    runtime.endpointUpdatedAt = null
+    runtime.lastError = `GitHub 端点读取失败，沿用配置地址：${err?.message ?? err}`
+    ctx.logger?.warn?.('dsh-pair-link: %s', runtime.lastError)
   }
-  if (!ok) throw new Error('签名校验失败，地址可能被改过')
+  if (runtime.remote) startPairing(ctx, runtime)
+}
 
-  if (runtime.publishPublicKey && runtime.publishPublicKey !== publicKey) {
-    throw new Error('公钥和上次记录的不一致，拒绝使用')
-  }
-  if (!runtime.publishPublicKey) {
-    runtime.publishPublicKey = publicKey
-    try { writeDiskConfig({ publishPublicKey: publicKey }) } catch { /* ignore */ }
-  }
-
-  const remote = resolveRemote(url, runtime.remote?.bridgeToken ?? '')
-  if (!remote) throw new Error('地址无法解析')
-  runtime.remote = remote
+async function syncEndpoint(ctx, runtime) {
+  const endpoint = await fetchEndpointFromGitHub(runtime)
+  const next = resolveRemote(endpoint.url, runtime.remote?.bridgeToken ?? '')
+  if (!next) throw new Error('地址无法解析')
+  runtime.remote = next
+  runtime.endpointSource = 'github'
+  runtime.endpointUpdatedAt = endpointStamp(endpoint)
   runtime.lastError = null
   runtime.reconnects = 0
-  try { writeDiskConfig({ pairUrl: url }) } catch { /* ignore */ }
+  try { writeDiskConfig({ pairUrl: endpoint.url }) } catch { /* ignore */ }
   restartPairing(ctx, runtime)
-  return { url, device, ts }
+  return { url: endpoint.url, device: endpoint.device, ts: endpoint.ts }
 }
 
 /** 电脑前面有 dsh-bridge 之类的登录墙时，用访问密码换一个会话 cookie。 */
@@ -1873,7 +1943,8 @@ export function apply(ctx, config) {
   applyPairingServer(ctx, runtime)
   applyApprovalBridge(ctx, runtime)
 
-  if (runtime.remote) startPairing(ctx, runtime)
+  // client 模式：先问 GitHub 要最新端点，失败再退回配置里的地址
+  if (runtime.remote) void bootstrapEndpoint(ctx, runtime)
 
   // 等 webServer 完成监听再起隧道
   const bootTimer = setTimeout(() => startQuickTunnel(ctx, runtime), 1200)

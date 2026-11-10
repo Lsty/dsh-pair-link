@@ -200,6 +200,26 @@ ctx.effect(() => {
 - 必须用 `ctx.effect` 持有 disposer，否则每次热重载都会在 root 上多留一个监听器
 - 旧实例残留的监听器用 `runtime.stopped` 直接 `next()` 交回原生
 
+## 端点自动跟随
+
+隧道每次重启都换地址，所以手机端启动时会先去 GitHub 拿最新端点：
+
+1. 电脑端 cloudflared 拿到新 URL 后，自动用 GitHub API 把 `endpoint.json` 写进仓库（`{ device, url, ts, publicKey, sig }`，ed25519 签名，不含任何密钥）
+2. 手机端 client 模式启动时：
+   - `GET https://api.github.com/repos/<repo>/contents/endpoint.json?ref=main`（公开读取、不带 Authorization、带 User-Agent，超时 8 秒）
+   - 验签 → 与本地 `pairUrl` 比较 → 不同就写盘（保留 `secret` 等其它字段）→ 用新地址连 WS
+   - GitHub 失败：沿用配置里的地址，原因写进 `lastError`，启动不被阻塞
+   - GitHub 地址连不上：12 秒后自动回退到配置里的旧地址，同样写 `lastError`
+3. `GET /dsh-pair/status` 增加 `endpointSource`（`github` / `config`）、`endpointUpdatedAt`（ISO 或 null）、`lastError`
+
+验收（本机实测）：
+
+```
+role=client  connected=true  endpointSource=github
+endpointUpdatedAt=2026-11-10T15:05:11.689Z  lastError=null
+config pairUrl = http://127.0.0.1:52716   （被 GitHub 端点覆盖）
+```
+
 ## 已知限制
 
 1. **专用隧道地址每次重启都会变**：`cloudflared` 的 `*.trycloudflare.com` 随进程重启变化。变了就到电脑端「远程电脑」面板顶部复制新地址，手机端「修改连接」里改一下，不用重装。
