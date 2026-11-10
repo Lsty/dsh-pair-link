@@ -320,6 +320,9 @@ function createRuntime(ctx, config, disk) {
       String(config?.pairUrl ?? '') || String(disk.pairUrl ?? ''),
       String(config?.bridgeToken ?? '') || String(disk.bridgeToken ?? ''),
     ),
+    // 电脑前面的远程访问插件（dsh-bridge 等）的访问密码：手机端服务端自己登录换 cookie
+    bridgePassword: String(config?.bridgePassword ?? '') || String(disk.bridgePassword ?? ''),
+    bridgeCookie: '',
     // host 侧
     clients: new Set(),
     approvals: new Map(),
@@ -599,6 +602,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
       host: runtime.remote?.httpOrigin ?? '',
       hasSecret: Boolean(runtime.secret),
       hasBridgeToken: Boolean(runtime.remote?.bridgeToken),
+      hasBridgePassword: Boolean(runtime.bridgePassword),
       apiBase: runtime.remote ? `${REMOTE_PREFIX}/api` : API_PREFIX,
       connected: runtime.connected,
       lastError: runtime.lastError,
@@ -624,6 +628,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
     if (typeof body?.pairUrl === 'string' && body.pairUrl.trim()) patch.pairUrl = body.pairUrl.trim()
     if (typeof body?.secret === 'string' && body.secret.trim()) patch.secret = body.secret.trim()
     if (typeof body?.bridgeToken === 'string' && body.bridgeToken.trim()) patch.bridgeToken = body.bridgeToken.trim()
+    if (typeof body?.bridgePassword === 'string' && body.bridgePassword.trim()) patch.bridgePassword = body.bridgePassword.trim()
 
     const nextRemote = resolveRemote(
       patch.pairUrl ?? runtime.remote?.httpOrigin ?? '',
@@ -640,6 +645,8 @@ function applyHostRoutes(ctx, runtime, sessions) {
     }
 
     if (patch.secret) runtime.secret = patch.secret
+    if (patch.bridgePassword) runtime.bridgePassword = patch.bridgePassword
+    runtime.bridgeCookie = ''
     runtime.remote = nextRemote
     runtime.approvals.clear()
     runtime.lastError = null
@@ -845,6 +852,42 @@ function scheduleReconnect(ctx, runtime) {
   }, RECONNECT_MS)
 }
 
+/** 电脑前面有 dsh-bridge 之类的登录墙时，用访问密码换一个会话 cookie。 */
+async function ensureBridgeCookie(runtime) {
+  if (!runtime.bridgePassword || !runtime.remote) return ''
+  if (runtime.bridgeCookie) return runtime.bridgeCookie
+  let res
+  try {
+    res = await fetch(`${runtime.remote.httpOrigin}/__dsh_bridge__/login`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ password: runtime.bridgePassword }),
+      signal: AbortSignal.timeout(15_000),
+    })
+  } catch (err) {
+    throw new Error(`登录电脑前面的远程访问插件失败：${err?.message ?? err}`)
+  }
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`
+    try {
+      const body = await res.json()
+      if (body?.error) message = String(body.error)
+    } catch { /* ignore */ }
+    throw new Error(`电脑前的远程访问插件拒绝了这个密码：${message}`)
+  }
+  const cookies = typeof res.headers.getSetCookie === 'function'
+    ? res.headers.getSetCookie()
+    : [res.headers.get('set-cookie') ?? '']
+  for (const cookie of cookies) {
+    const match = /(?:^|;\s*)dsh_bridge_auth=([^;]+)/.exec(String(cookie ?? ''))
+    if (match) {
+      runtime.bridgeCookie = `dsh_bridge_auth=${match[1]}`
+      return runtime.bridgeCookie
+    }
+  }
+  throw new Error('登录成功但没拿到会话 cookie')
+}
+
 function applyProxy(ctx, runtime) {
   const route = (kind, path, handler) => ctx.effect(() => ctx.webServer.register({ kind, path, handler }))
 
@@ -875,22 +918,45 @@ function applyProxy(ctx, runtime) {
     const headers = { [PAGE_TOKEN_HEADER]: runtime.secret }
     if (body) headers['content-type'] = 'application/json'
 
-    const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), 25_000)
+    let cookie = ''
+    if (runtime.bridgePassword) {
+      try {
+        cookie = await ensureBridgeCookie(runtime)
+      } catch (err) {
+        return sendJson(res, 502, { ok: false, error: String(err?.message ?? err) })
+      }
+    }
+
+    const forward = async (cookieValue) => {
+      const controller = new AbortController()
+      const timer = setTimeout(() => controller.abort(), 25_000)
+      try {
+        return await fetch(target, {
+          method: req.method,
+          headers: cookieValue ? { ...headers, cookie: cookieValue } : headers,
+          body: body || undefined,
+          signal: controller.signal,
+          redirect: 'manual',
+        })
+      } finally {
+        clearTimeout(timer)
+      }
+    }
+
     let upstream
     try {
-      upstream = await fetch(target, {
-        method: req.method,
-        headers,
-        body: body || undefined,
-        signal: controller.signal,
-        redirect: 'manual',
-      })
+      upstream = await forward(cookie)
+      // cookie 过期或电脑重启过：清掉重登一次
+      if (upstream.status === 401 && cookie && runtime.bridgePassword) {
+        runtime.bridgeCookie = ''
+        try {
+          cookie = await ensureBridgeCookie(runtime)
+          upstream = await forward(cookie)
+        } catch { /* 保留第一次的 401 响应 */ }
+      }
     } catch (err) {
-      clearTimeout(timer)
       return sendJson(res, 502, { ok: false, error: `无法连接电脑：${err?.message ?? err}` })
     }
-    clearTimeout(timer)
 
     let text = ''
     try { text = await upstream.text() } catch { /* ignore */ }

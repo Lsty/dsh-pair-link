@@ -68,9 +68,17 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 {
   "secret": "与电脑端同一个值",
   "pairUrl": "https://<隧道域名>",
-  "bridgeToken": "（可选）电脑前面那个远程访问插件的免密令牌"
+  "bridgeToken": "（可选）电脑前面那个远程访问插件的免密令牌",
+  "bridgePassword": "（可选）电脑前面那个远程访问插件的访问密码"
 }
 ```
+
+`bridgeToken` 和 `bridgePassword` 有一位就够：
+
+- **有密码就填密码**：插件在手机端服务端 `POST /__dsh_bridge__/login` 换会话 cookie，之后代理自动带 cookie，过期了会重登。密码只需要填一次。
+- 有免密 token 也可以填 token（会拼成 `?token=`）。
+
+> 密码/令牌只写在本机 `~/.dsh/dsh-pair-link.json`，不写日志。
 
 `pairUrl` 支持这些写法，插件会自己归一：
 
@@ -123,7 +131,7 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 ## 已知限制
 
 1. **隧道地址每次重启都会变**：`cloudflared` 的 `*.trycloudflare.com` 随进程重启变化。变了就在手机端「修改连接」里改 `pairUrl`，不用重装。
-2. **电脑前面若挡着远程访问插件**（如 dsh-bridge），它会对未认证请求返回 401。把它的免密令牌填到手机端「桥接令牌」即可；它会作为 `?token=` 拼到转发请求上。
+2. **电脑前面若挡着远程访问插件**（如 dsh-bridge），它会对未认证请求返回 401。在手机端「修改连接」里填它的**访问密码**（推荐，插件会自己登录换会话）或免密令牌；两者都不填就会看到 401 提示。
 3. **审批桥是附加能力**：`approval/request` 只有在 DSH 真正发起审批时才有回调（工具进入询问模式）。面板里的「发送 / 停止 / 读消息」不依赖它。
 4. **消息按事件分页**：`limit` 是页大小，工具调用也算一条。页面默认折叠工具行，用「工具」按钮展开。
 5. **手机端审批浮层只在前台存活**：3 秒轮询，锁屏或被系统冻结时收不到。

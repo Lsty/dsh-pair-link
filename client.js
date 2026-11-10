@@ -163,6 +163,7 @@ window.__ModuleLoader__.load({
       const [pairUrl, setPairUrl] = React.useState(info && info.host ? info.host : '')
       const [secret, setSecret] = React.useState('')
       const [bridgeToken, setBridgeToken] = React.useState('')
+      const [bridgePassword, setBridgePassword] = React.useState('')
       const [busy, setBusy] = React.useState(false)
       const [error, setError] = React.useState(null)
       const [saved, setSaved] = React.useState(false)
@@ -191,9 +192,11 @@ window.__ModuleLoader__.load({
           if (pairUrl.trim()) body.pairUrl = pairUrl.trim()
           if (secret.trim()) body.secret = secret.trim()
           if (bridgeToken.trim()) body.bridgeToken = bridgeToken.trim()
+          if (bridgePassword.trim()) body.bridgePassword = bridgePassword.trim()
           await callJson('', '/dsh-pair/config', { method: 'POST', body: JSON.stringify(body) })
           setSaved(true)
           setSecret('')
+          setBridgePassword('')
           if (onSaved) onSaved()
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
@@ -242,13 +245,27 @@ window.__ModuleLoader__.load({
           onChange: (e) => setBridgeToken(e.target.value),
         }),
 
+        h('label', { style: labelStyle }, '访问密码（可选）'),
+        h('input', {
+          style: inputStyle,
+          value: bridgePassword,
+          type: 'password',
+          placeholder: info && info.hasBridgePassword ? '已保存，留空表示不修改' : '电脑前面那个远程访问插件的访问密码',
+          autoCapitalize: 'off',
+          autoCorrect: 'off',
+          spellCheck: false,
+          onChange: (e) => setBridgePassword(e.target.value),
+        }),
+        h('div', { style: { fontSize: 11.5, color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.6, marginTop: 4 } },
+          '电脑如果开了 dsh-bridge 之类的外网访问插件，填它的访问密码即可，插件会在手机端自己登录换会话。密码只写在这台手机的 ~/.dsh/dsh-pair-link.json。'),
+
         error ? h('div', { style: { marginTop: 10, fontSize: 12, color: 'var(--dsw-alias-state-error-primary)' } }, error) : null,
         saved ? h('div', { style: { marginTop: 10, fontSize: 12, color: 'var(--dsw-alias-state-success-primary)' } }, '已保存并生效') : null,
 
         h('div', { style: { display: 'flex', gap: 8, marginTop: 14 } },
           h(Button, { kind: 'primary', onClick: save, disabled: busy }, busy ? '保存中…' : '保存并连接'),
           info && info.host
-            ? h(Button, { onClick: () => { setPairUrl(''); setSecret(''); setBridgeToken('') } }, '清空输入')
+            ? h(Button, { onClick: () => { setPairUrl(''); setSecret(''); setBridgeToken(''); setBridgePassword('') } }, '清空输入')
             : null))
     }
 
