@@ -1,7 +1,7 @@
 {
   "device": "Ma",
-  "url": "http://127.0.0.1:52716",
-  "ts": 1794323111689,
+  "url": "https://hay-night-therapy-sharon.trycloudflare.com",
+  "ts": 1794323442064,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "qHfpf7s5Pvnt/+1aDbhu6mxVWBDX/G+GRsPWjqZpk7qewivVRVDKYJGfn0+9a4dhROKSM+cFGOo5bpGzq4JXDg=="
+  "sig": "JCnPdtUuJyJj1fE0WvIuSNU4pQcV0V+f55+dZvcg2bhSq1tapPi+ZIfqUun1kOAaWJI3MiuzqZ+I5G4vAuqEBw=="
 }
