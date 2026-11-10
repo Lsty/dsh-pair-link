@@ -132,6 +132,14 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 { "type": "approval-decision", "id": "uuid", "outcome": "allowed-once" }
 ```
 
+## 附件
+
+对话输入框左边的 📎 可以选图片或文件（单次最多 4 个，单个 ≤ 8MB）：
+
+- 手机端读成 base64，随文本一起 POST 到 `/dsh-pair/api/sessions/:id/upload`
+- 电脑端用 `ctx.attachments.saveImage` / `saveFile` 落到附件存储，再作为一条 prompt 发出去
+- 纯附件、不带文字也能发（输入框留空即可）
+
 ## 从电脑更新（不用 GitHub）
 
 连上之后，手机端可以**直接从电脑拉新版本**，绕开 GitHub：

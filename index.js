@@ -21,11 +21,11 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.0'
+const VERSION = '0.4.1'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
-const MAX_BODY_BYTES = 512 * 1024
+const MAX_BODY_BYTES = 16 * 1024 * 1024
 const RECONNECT_MS = 5000
 const API_PREFIX = '/dsh-pair/api'
 const REMOTE_PREFIX = '/dsh-pair/remote'
@@ -483,16 +483,58 @@ function applySessionApi(ctx, runtime) {
     return { messages: compactMessages(events.map(toDisplayMessage)), cursor }
   }
 
-  async function promptSession(sessionId, text) {
+  async function promptSession(sessionId, content) {
     const controller = controllerOf()
     if (!controller?.prompt) throw new Error('这个 DSH 版本没有可用的会话写入服务')
+    const parts = Array.isArray(content)
+      ? content
+      : [{ type: 'text', text: String(content ?? '') }]
     await controller.prompt({
       requestId: randomUUID(),
       sessionId,
       mode: 'queue',
-      content: [{ type: 'text', text }],
+      content: parts,
     }, AbortSignal.timeout(20_000))
     return { accepted: true }
+  }
+
+  /** 手机端附件：base64 图片/文件先落盘到附件服务，再作为一条 prompt 发出去。 */
+  async function uploadToSession(sessionId, body) {
+    const attachments = ctx.get?.('attachments')
+    if (!attachments?.saveImage) throw new Error('这个 DSH 版本没有附件服务')
+
+    const parts = []
+    const text = String(body?.text ?? '').trim()
+    if (text) parts.push({ type: 'text', text })
+
+    const images = Array.isArray(body?.images) ? body.images.slice(0, 4) : []
+    const files = Array.isArray(body?.files) ? body.files.slice(0, 4) : []
+
+    for (const image of images) {
+      const data = Buffer.from(String(image?.data ?? ''), 'base64')
+      if (data.length === 0) continue
+      if (data.length > 8 * 1024 * 1024) throw new Error(`图片 ${image?.name ?? ''} 超过 8MB`)
+      const ref = await attachments.saveImage({
+        data,
+        mediaType: String(image?.mediaType ?? 'image/png'),
+        ...(image?.name ? { name: String(image.name) } : {}),
+      })
+      parts.push({ type: 'image', attachment: ref })
+    }
+
+    for (const file of files) {
+      const data = Buffer.from(String(file?.data ?? ''), 'base64')
+      if (data.length === 0) continue
+      if (data.length > 12 * 1024 * 1024) throw new Error(`文件 ${file?.name ?? ''} 超过 12MB`)
+      const ref = await attachments.saveFile({
+        data,
+        ...(file?.name ? { name: String(file.name) } : {}),
+      })
+      parts.push({ type: 'file', attachment: ref })
+    }
+
+    if (parts.length === 0) throw new Error('没有可发送的内容')
+    return promptSession(sessionId, parts)
   }
 
   async function cancelSession(sessionId) {
@@ -624,6 +666,7 @@ function applySessionApi(ctx, runtime) {
     readMessages,
     promptSession,
     cancelSession,
+    uploadToSession,
     buildTree,
     sessionMeta,
     setSessionModel,
@@ -738,6 +781,15 @@ function applyHostRoutes(ctx, runtime, sessions) {
           if (!text) { sendJson(res, 400, { ok: false, error: 'empty text' }); return }
           if (text.length > 40_000) { sendJson(res, 413, { ok: false, error: 'text too long' }); return }
           const result = await sessions.promptSession(sessionId, text)
+          sendJson(res, 200, { ok: true, ...result })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'upload') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
+          const result = await sessions.uploadToSession(sessionId, body)
           sendJson(res, 200, { ok: true, ...result })
           return
         }

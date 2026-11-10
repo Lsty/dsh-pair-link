@@ -132,6 +132,8 @@ window.__ModuleLoader__.load({
 .pair-textarea {
   box-sizing: border-box;
   width: 100%;
+  flex: 1;
+  min-width: 0;
   resize: none;
   border: .5px solid var(--dsw-alias-border-l4);
   border-radius: var(--dsw-radius-md);
@@ -194,6 +196,39 @@ window.__ModuleLoader__.load({
 .pair-menu-item[data-active="true"] { background: var(--dsw-alias-interactive-bg-active); }
 .pair-menu-item small { display: block; font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); font-weight: 400; }
 .pair-menu-check { width: 14px; color: var(--dsw-alias-state-business-primary); flex: 0 0 auto; }
+
+.pair-attach-row { display: flex; gap: 6px; flex-wrap: wrap; padding: 2px 0; }
+.pair-attach {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 46vw;
+  padding: 3px 6px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l1);
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-secondary);
+}
+.pair-attach img { width: 28px; height: 28px; object-fit: cover; border-radius: var(--dsw-radius-sm); }
+.pair-attach-name { max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair-attach-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  font-size: 12px;
+}
+.pair-attach-remove:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
 .pair-reasoning {
   margin: 2px 0 4px;
@@ -319,6 +354,19 @@ window.__ModuleLoader__.load({
       const text = String(path ?? '').replace(/[\\/]+$/, '')
       const parts = text.split(/[\\/]/)
       return parts[parts.length - 1] || text
+    }
+
+    function readAsBase64(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => {
+          const result = String(reader.result || '')
+          const comma = result.indexOf(',')
+          resolve(comma >= 0 ? result.slice(comma + 1) : '')
+        }
+        reader.onerror = () => reject(new Error('读取文件失败'))
+        reader.readAsDataURL(file)
+      })
     }
 
     function useNarrow() {
@@ -797,8 +845,10 @@ window.__ModuleLoader__.load({
       const [sending, setSending] = React.useState(false)
       const [refreshedAt, setRefreshedAt] = React.useState(0)
       const [showTools, setShowTools] = React.useState(false)
+      const [pending, setPending] = React.useState([])
       const scrollRef = React.useRef(null)
       const stickToBottom = React.useRef(true)
+      const fileRef = React.useRef(null)
 
       const load = React.useCallback(async () => {
         try {
@@ -872,15 +922,31 @@ window.__ModuleLoader__.load({
 
       const send = async () => {
         const text = draft.trim()
-        if (!text || sending) return
+        if ((!text && pending.length === 0) || sending) return
         setSending(true)
         setError(null)
         try {
-          await callJson(base, `/sessions/${encodeURIComponent(session.id)}/prompt`, {
-            method: 'POST',
-            body: JSON.stringify({ text }),
-          })
+          if (pending.length > 0) {
+            await callJson(base, `/sessions/${encodeURIComponent(session.id)}/upload`, {
+              method: 'POST',
+              body: JSON.stringify({
+                text,
+                images: pending
+                  .filter((item) => item.kind === 'image')
+                  .map((item) => ({ name: item.name, mediaType: item.mediaType, data: item.data })),
+                files: pending
+                  .filter((item) => item.kind !== 'image')
+                  .map((item) => ({ name: item.name, data: item.data })),
+              }),
+            })
+          } else {
+            await callJson(base, `/sessions/${encodeURIComponent(session.id)}/prompt`, {
+              method: 'POST',
+              body: JSON.stringify({ text }),
+            })
+          }
           setDraft('')
+          setPending([])
           stickToBottom.current = true
           await load()
           if (onChanged) onChanged()
@@ -889,6 +955,37 @@ window.__ModuleLoader__.load({
         } finally {
           setSending(false)
         }
+      }
+
+      const addFiles = async (fileList) => {
+        const list = Array.from(fileList || []).slice(0, 4)
+        if (list.length === 0) return
+        const next = []
+        for (const file of list) {
+          if (file.size > 8 * 1024 * 1024) {
+            setError(`${file.name} 超过 8MB，已跳过`)
+            continue
+          }
+          try {
+            const data = await readAsBase64(file)
+            const isImage = String(file.type || '').startsWith('image/')
+            next.push({
+              key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+              name: file.name || 'attachment',
+              mediaType: file.type || 'application/octet-stream',
+              data,
+              kind: isImage ? 'image' : 'file',
+              preview: isImage ? `data:${file.type};base64,${data}` : '',
+            })
+          } catch {
+            setError(`读取 ${file.name} 失败`)
+          }
+        }
+        if (next.length) setPending((prev) => [...prev, ...next].slice(0, 4))
+      }
+
+      const removePending = (key) => {
+        setPending((prev) => prev.filter((item) => item.key !== key))
       }
 
       const stop = async () => {
@@ -968,12 +1065,43 @@ window.__ModuleLoader__.load({
           : messages
             .filter((message) => showTools || message.role !== 'tool')
             .map((message, index) => h(MessageBubble, { key: `${message.seq}-${index}`, message }))),
-        h('div', { style: { display: 'flex', gap: 8, alignItems: 'flex-end', flex: '0 0 auto' } },
+        pending.length > 0
+          ? h('div', { className: 'pair-attach-row' },
+            pending.map((item) => h('div', { key: item.key, className: 'pair-attach' },
+              item.preview
+                ? h('img', { src: item.preview, alt: '' })
+                : h('span', null, '📎'),
+              h('span', { className: 'pair-attach-name' }, item.name),
+              h('button', {
+                type: 'button',
+                className: 'pair-attach-remove',
+                onClick: () => removePending(item.key),
+                title: '移除',
+              }, '×'))))
+          : null,
+        h('input', {
+          ref: fileRef,
+          type: 'file',
+          multiple: true,
+          style: { display: 'none' },
+          onChange: (e) => {
+            addFiles(e.target.files)
+            e.target.value = ''
+          },
+        }),
+        h('div', { style: { display: 'flex', gap: 6, alignItems: 'flex-end', flex: '0 0 auto' } },
+          h(Button, {
+            kind: 'ghost',
+            size: 'sm',
+            onClick: () => { if (fileRef.current) fileRef.current.click() },
+            title: '添加图片或文件',
+            style: { height: 44, padding: '0 10px', fontSize: 16 },
+          }, '📎'),
           h('textarea', {
             className: 'pair-textarea',
             value: draft,
             rows: 2,
-            placeholder: '发到电脑上的这个会话…',
+            placeholder: pending.length > 0 ? '给这些附件加一句话（可留空）…' : '发到电脑上的这个会话…',
             onChange: (e) => setDraft(e.target.value),
             onKeyDown: (e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -985,7 +1113,7 @@ window.__ModuleLoader__.load({
           h(Button, {
             kind: 'primary',
             onClick: send,
-            disabled: sending || !draft.trim(),
+            disabled: sending || (!draft.trim() && pending.length === 0),
             style: { minWidth: 64 },
           }, sending ? '发送中…' : '发送')))
     }
