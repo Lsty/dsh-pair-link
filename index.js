@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.2'
+const VERSION = '0.4.3'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -1042,6 +1042,29 @@ function applyHostRoutes(ctx, runtime, sessions) {
     }
   })
 
+  // --- 审批链路自测：直接向 approval 服务发一条请求 ---
+  route('exact', '/dsh-pair/test-approval', async (req, res) => {
+    cors(res)
+    if (!authorize(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' })
+    const approval = ctx.get?.('approval')
+    const agents = ctx.get?.('agents')
+    if (!approval?.request) return sendJson(res, 501, { ok: false, error: '这个 DSH 版本没有 approval 服务' })
+    const wanted = requestUrl(req).searchParams.get('session') ?? ''
+    let agent = wanted ? agents?.get?.(wanted) ?? null : null
+    if (!agent) agent = (agents?.list?.() ?? [])[0] ?? null
+    if (!agent) return sendJson(res, 409, { ok: false, error: '没有活动 agent' })
+    try {
+      const outcome = await approval.request({
+        agent,
+        toolName: 'dsh-pair-link.test',
+        reason: '这是插件发出的一条测试审批，用来验证手机端能不能收到并回传。',
+      })
+      return sendJson(res, 200, { ok: true, outcome, sessionId: agent.id })
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
+    }
+  })
+
   // --- 保存连接配置（立即生效，不需要重启） ---
   route('exact', '/dsh-pair/config', async (req, res) => {
     cors(res)
@@ -1750,7 +1773,15 @@ function applyPairingServer(ctx, runtime) {
 }
 
 function applyApprovalBridge(ctx, runtime) {
-  const register = (scope) => scope.on('approval/request', async (request, next) => {
+  const probe = (line) => {
+    try {
+      appendFileSync(join(dshHome(), 'pair-scope-probe.log'), `${new Date().toISOString()} ${line}\n`)
+    } catch { /* ignore */ }
+  }
+  const handler = async (request, next) => {
+    // 热重载会留下旧实例的 root 监听器，它们只该把请求交回原生 answerer
+    if (runtime.stopped) return next()
+    probe(`FIRED tool=${request?.toolName ?? '?'} clients=${runtime.clients.size}`)
     try {
       if (runtime.clients.size === 0) return next()
       runtime.approvalsSeen += 1
@@ -1796,31 +1827,23 @@ function applyApprovalBridge(ctx, runtime) {
       ctx.logger?.warn?.('dsh-pair-link: approval bridge error: %s', err?.message ?? err)
       return next()
     }
-  })
-
-  try {
-    const list = ctx.get?.('agents')?.list?.() ?? []
-    let attached = 0
-    for (const agent of list) {
-      const scope = agent?.ctx && typeof agent.ctx.on === 'function' ? agent.ctx : agent
-      if (typeof scope?.on === 'function') {
-        register(scope)
-        attached += 1
-      }
-    }
-    ctx.logger?.info?.('dsh-pair-link: approval bridge attached to %d/%d agents', attached, list.length)
-  } catch (err) {
-    ctx.logger?.warn?.('dsh-pair-link: attach existing agents failed: %s', err?.message ?? err)
   }
 
-  ctx.effect(() => ctx.on('agent/created', function onAgentCreated() {
+  // 只挂在 root 上：prepend 之后的 root 监听器能收到所有 agent 的审批请求。
+  // 用 ctx.effect 持有 disposer，否则每次重载都会在 root 上多留一个监听器。
+  ctx.effect(() => {
     try {
-      const scope = this?.ctx ?? this
-      register(scope)
+      const rootCtx = ctx.root ?? ctx
+      const off = rootCtx.on('approval/request', handler, { prepend: true })
+      probe('ROOT_ATTACHED')
+      ctx.logger?.info?.('dsh-pair-link: approval bridge attached at root')
+      return () => { try { off() } catch { /* ignore */ } }
     } catch (err) {
-      ctx.logger?.warn?.('dsh-pair-link: per-agent approval bridge failed: %s', err?.message ?? err)
+      probe(`ROOT_FAIL ${err?.message ?? err}`)
+      ctx.logger?.warn?.('dsh-pair-link: approval bridge attach failed: %s', err?.message ?? err)
+      return undefined
     }
-  }))
+  })
 
   ctx.effect(() => ctx.on('agent/assistant-stream', (payload) => {
     if (runtime.clients.size === 0) return

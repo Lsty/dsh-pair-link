@@ -175,6 +175,31 @@ quick tunnel 每次重启都换地址，开发时手机端老是跟不上。电�
 
 风险：`publishToken` 是长期存在电脑配置文件里的，能改这个仓库。开发期够用，正式方案应换成 Cloudflare 命名隧道或自建注册中心。
 
+## 审批为什么能挂上（踩过的坑）
+
+DSH 用 `approval` 服务派发审批请求：
+
+```js
+this.ctx.waterfall(scopeTarget(req.agent, req.agent), 'approval/request', req, next)
+```
+
+`scopeTarget` 的过滤器只放行「无 scope tag 的监听器」或「scope 链匹配的监听器」，而 `key` 传的是 agent 对象、`tag` 是 symbol，第三方插件用普通 `ctx.on()` 注册**永远收不到**。
+
+正确做法是抄 `dsh-channel-wechat` 的注册方式——**第三个参数带 `{ prepend: true }`**：
+
+```js
+ctx.effect(() => {
+  const off = ctx.root.on('approval/request', handler, { prepend: true })
+  return () => off()
+})
+```
+
+加上 `prepend` 之后 root 上的监听器立刻能收到所有 agent 的审批请求（实测 probe 从「一次都没有」变成「每次都有」）。注意：
+
+- 必须挂在 `ctx.root`（不是插件 ctx）
+- 必须用 `ctx.effect` 持有 disposer，否则每次热重载都会在 root 上多留一个监听器
+- 旧实例残留的监听器用 `runtime.stopped` 直接 `next()` 交回原生
+
 ## 已知限制
 
 1. **专用隧道地址每次重启都会变**：`cloudflared` 的 `*.trycloudflare.com` 随进程重启变化。变了就到电脑端「远程电脑」面板顶部复制新地址，手机端「修改连接」里改一下，不用重装。
