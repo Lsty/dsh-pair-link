@@ -9,7 +9,7 @@
 // 因为 profile 用 link: 安装本地包时不会安装 dependencies。
 
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, appendFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
@@ -281,7 +281,14 @@ function applyHost(ctx, { secret, wsPath }) {
     },
   }))
 
-  ctx.effect(() => ctx.on('approval/request', async (req, next) => {
+  const registerApprovalBridge = (scope) => scope.on('approval/request', async (req, next) => {
+    try {
+      const probe = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+      appendFileSync(
+        join(probe, 'pair-scope-probe.log'),
+        `${new Date().toISOString()} FIRED tool=${req?.toolName ?? '?'} clients=${clients.size}\n`,
+      )
+    } catch { /* ignore */ }
     try {
       if (clients.size === 0) return next()
       state.approvalsSeen += 1
@@ -329,6 +336,42 @@ function applyHost(ctx, { secret, wsPath }) {
     } catch (err) {
       ctx.logger?.warn?.('dsh-pair-link: approval bridge error: %s', err?.message ?? err)
       return next()
+    }
+  })
+
+  // 已存在的 agent 也要挂上（agent/created 只覆盖之后新建的）
+  try {
+    const list = ctx.get?.('agents')?.list?.() ?? []
+    let attached = 0
+    for (const a of list) {
+      const scope = a?.ctx && typeof a.ctx.on === 'function' ? a.ctx : a
+      if (typeof scope?.on === 'function') { registerApprovalBridge(scope); attached += 1 }
+    }
+    try {
+      const probe = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+      appendFileSync(
+        join(probe, 'pair-scope-probe.log'),
+        `${new Date().toISOString()} EXISTING_AGENTS=${list.length} ATTACHED=${attached}\n`,
+      )
+    } catch { /* ignore */ }
+  } catch (err) {
+    ctx.logger?.warn?.('dsh-pair-link: attach existing agents failed: %s', err?.message ?? err)
+  }
+
+  // approval/request 是 agent-scoped waterfall（this: Scoped<Agent>），
+  // 在 profile root 注册收不到；必须挂到每个 agent 的 scope 上。
+  ctx.effect(() => ctx.on('agent/created', function onCreate(payload) {
+    try {
+      const probe = process.env.DSH_HOME ?? join(homedir(), '.dsh')
+      appendFileSync(
+        join(probe, 'pair-scope-probe.log'),
+        `${new Date().toISOString()} AGENT_CREATED id=${payload?.agent?.id ?? '?'} thisIsCtx=${typeof this?.on === 'function'}\n`,
+      )
+    } catch { /* ignore */ }
+    try {
+      registerApprovalBridge(this)
+    } catch (err) {
+      ctx.logger?.warn?.('dsh-pair-link: per-agent approval bridge failed: %s', err?.message ?? err)
     }
   }))
 
