@@ -998,7 +998,8 @@ function applyProxy(ctx, runtime) {
 
     let target
     try {
-      target = new URL(`${runtime.remote.httpOrigin}${rest}${url.search}`)
+      // rest 是 `/api/...`，必须补回 `/dsh-pair` 前缀，否则打到 DSH 自己的 /api 网关
+      target = new URL(`${runtime.remote.httpOrigin}/dsh-pair${rest}${url.search}`)
     } catch {
       return sendJson(res, 400, { ok: false, error: 'bad target url' })
     }
