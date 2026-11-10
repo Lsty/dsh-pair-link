@@ -309,6 +309,59 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
 }
 
+.pair-file-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l1);
+}
+.pair-file-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pair-file-tool {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 16px;
+  padding: 0 6px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+}
+.pair-file-path {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
+.pair-file-preview {
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--dsw-alias-label-tertiary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 96px;
+  overflow: hidden;
+}
+.pair-file-code {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-1);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 17px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .pair-tree { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 120px; padding-right: 2px; }
 .pair-search { position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; background: var(--dsw-alias-bg-layer-1); }
 .pair-search input {
@@ -1109,10 +1162,38 @@ window.__ModuleLoader__.load({
           : null)
     }
 
+    function FileEditCard({ message }) {
+      const [open, setOpen] = React.useState(false)
+      const body = String(message.body || '')
+      const oldText = String(message.oldText || '')
+      const content = body || oldText
+      const isWrite = message.tool === 'write'
+      const preview = content.length > 220 ? `${content.slice(0, 220)}…` : content
+      return h('div', { className: 'pair-file-edit' },
+        h('div', { className: 'pair-file-head' },
+          h('span', { className: 'pair-file-tool' }, isWrite ? '写入' : '修改'),
+          h('code', { className: 'pair-file-path' }, message.text)),
+        content
+          ? (open
+            ? h('pre', { className: 'pair-file-code' }, content)
+            : h('div', { className: 'pair-file-preview' }, preview))
+          : h('div', { className: 'pair-hint' }, '内容为空或不是文本'),
+        content
+          ? h('button', {
+            type: 'button',
+            className: 'pair-more',
+            onClick: () => setOpen((value) => !value),
+          }, open ? '收起' : `展开全文（${content.length} 字）`)
+          : null)
+    }
+
     function MessageBubble({ message, onAnswer, answering }) {
       const role = message.role
       if (role === 'question') {
         return h(QuestionCard, { message, onAnswer, busy: answering, readOnly: true })
+      }
+      if (role === 'file-edit') {
+        return h(FileEditCard, { message })
       }
       if (role === 'tool-image') {
         return h('div', { style: { alignSelf: 'flex-start', maxWidth: '88%' } },

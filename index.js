@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.17'
+const VERSION = '0.4.18'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 15 * 60_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -250,6 +250,24 @@ function toDisplayMessage(event) {
         }
       }
     }
+    if (name === 'edit' || name === 'write') {
+      const args = parseToolArgs(data.arguments)
+      const filePath = String(args?.file_path ?? args?.path ?? '')
+      if (filePath) {
+        const body = String(args?.content ?? args?.new_string ?? '')
+        const oldText = String(args?.old_string ?? '')
+        return {
+          seq,
+          time,
+          role: 'file-edit',
+          tool: name,
+          text: filePath,
+          body,
+          oldText,
+          callId: String(data.callId ?? ''),
+        }
+      }
+    }
     return { seq, time, role: 'tool', text: name }
   }
   if (type === 'turn/end') {
@@ -257,6 +275,17 @@ function toDisplayMessage(event) {
     if (kind && kind !== 'completed') return { seq, time, role: 'system', text: `本轮结束：${kind}` }
   }
   return null
+}
+
+/** 解析工具调用的 arguments（字符串或已解析对象）。 */
+function parseToolArgs(raw) {
+  if (!raw) return null
+  if (typeof raw === 'object') return raw
+  try {
+    return JSON.parse(String(raw))
+  } catch {
+    return null
+  }
 }
 
 /** 解析 ask_user_question 工具参数里的问题列表（字符串或已解析对象都兼容）。 */
@@ -290,16 +319,34 @@ function parseAskQuestions(raw) {
 
 function compactMessages(rows) {
   const out = []
+  let current = null
   for (const row of rows) {
     if (!row) continue
     // 工具调用行只保留名字；没有文字/思考/图片/提问的整条丢弃
     if (
       row.role !== 'tool'
+      && row.role !== 'file-edit'
       && !row.text
       && !row.reasoning
       && !(row.images && row.images.length)
       && !(row.questions && row.questions.length)
     ) continue
+
+    if (row.role === 'assistant') {
+      // 同一轮里思考段和正文段是多个事件，中间还夹着工具调用，合成一条显示
+      if (current) {
+        current.text = [current.text, row.text].filter(Boolean).join('\n\n')
+        current.reasoning = [current.reasoning, row.reasoning].filter(Boolean).join('\n\n')
+        current.images = [...(current.images ?? []), ...(row.images ?? [])]
+        current.seq = row.seq
+      } else {
+        current = row
+        out.push(row)
+      }
+      continue
+    }
+
+    if (row.role === 'user' || row.role === 'system' || row.role === 'question') current = null
     out.push(row)
   }
   return out
