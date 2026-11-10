@@ -152,6 +152,29 @@ dsh plugin --profile desktop add github.com/Lsty/dsh-pair-link
 
 只认本机页面令牌，远程密钥不能触发（避免远程覆盖手机代码）。
 
+## 地址自动同步（开发期兜底）
+
+quick tunnel 每次重启都换地址，开发时手机端老是跟不上。电脑端可以把地址**签名发布**到 GitHub，手机端连不上时来拉：
+
+电脑端 `~/.dsh/dsh-pair-link.json`：
+
+```json
+{
+  "secret": "…",
+  "publishToken": "ghp_…（Contents: Read and write）",
+  "publishRepo": "Lsty/dsh-pair-link",
+  "publishPath": "endpoint.json"
+}
+```
+
+- 隧道就绪后自动 `PUT` 一个 `endpoint.json`：`{ device, url, ts, publicKey, sig }`
+- `sig` 是用本机 ed25519 私钥对 `device|url|ts` 的签名，公钥随文件发布
+- 私钥第一次发布时生成，存在配置的 `publishPrivateKey`
+
+手机端连不上时，面板上点「从 GitHub 同步地址」：读文件 → 验签 → 校验公钥（首次信任并保存，之后不一致就拒绝）→ 更新 `pairUrl` 并重连。
+
+风险：`publishToken` 是长期存在电脑配置文件里的，能改这个仓库。开发期够用，正式方案应换成 Cloudflare 命名隧道或自建注册中心。
+
 ## 已知限制
 
 1. **专用隧道地址每次重启都会变**：`cloudflared` 的 `*.trycloudflare.com` 随进程重启变化。变了就到电脑端「远程电脑」面板顶部复制新地址，手机端「修改连接」里改一下，不用重装。

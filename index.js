@@ -10,7 +10,17 @@
 //
 //  零依赖：自带最小 WebSocket 实现（服务端 + 客户端都用运行时自带的）。
 
-import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import {
+  createHash,
+  createPrivateKey,
+  createPublicKey,
+  generateKeyPairSync,
+  randomBytes,
+  randomUUID,
+  sign,
+  timingSafeEqual,
+  verify,
+} from 'node:crypto'
 import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -21,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.1'
+const VERSION = '0.4.2'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -159,10 +169,19 @@ function blocksText(content) {
     if (!block || typeof block !== 'object') continue
     if (block.type === 'text' && typeof block.text === 'string') out.push(block.text)
     else if (block.type === 'reasoning') continue
-    else if (block.type === 'image') out.push('[图片]')
     else if (block.type === 'file') out.push(`[文件${block.attachment?.name ? ` ${block.attachment.name}` : ''}]`)
   }
   return out.join('\n').trim()
+}
+
+/** 收集消息里的图片引用，稍后由 readMessages 内联成 base64。 */
+function collectImages(content) {
+  if (!Array.isArray(content)) return []
+  const out = []
+  for (const block of content) {
+    if (block && block.type === 'image' && block.attachment) out.push(block.attachment)
+  }
+  return out
 }
 
 /** DSH 会把运行上下文、技能目录等注入成 user/message，手机端不该看到这些。 */
@@ -191,14 +210,29 @@ function toDisplayMessage(event) {
   const seq = Number(event?.seq ?? 0)
   if (type === 'user/message') {
     const data = event.data ?? {}
-    const text = blocksText(data.content ?? data.message?.content)
+    const content = data.content ?? data.message?.content
+    const text = blocksText(content)
     if (isInjectedUserEvent(data, text)) return null
-    return { seq, time, role: 'user', text }
+    return { seq, time, role: 'user', text, images: collectImages(content) }
   }
   if (type === 'assistant/message') {
     const data = event.data ?? {}
     const content = data.message?.content ?? data.content
-    return { seq, time, role: 'assistant', text: blocksText(content), reasoning: blocksReasoning(content) }
+    return {
+      seq,
+      time,
+      role: 'assistant',
+      text: blocksText(content),
+      reasoning: blocksReasoning(content),
+      images: collectImages(content),
+    }
+  }
+  if (type === 'tool/result') {
+    const data = event.data ?? {}
+    const content = data.message?.content
+    const images = collectImages(content)
+    if (images.length === 0) return null
+    return { seq, time, role: 'tool-image', text: '', images, tool: data.message?.toolCallId ?? '' }
   }
   if (type === 'tool/call') {
     return { seq, time, role: 'tool', text: String(event.data?.name ?? '工具') }
@@ -214,8 +248,8 @@ function compactMessages(rows) {
   const out = []
   for (const row of rows) {
     if (!row) continue
-    // 工具调用行只保留名字；其余空文本（纯推理 / 纯工具调用）不占气泡
-    if (row.role !== 'tool' && !row.text && !row.reasoning) continue
+    // 工具调用行只保留名字；没有文字/思考/图片的整条丢弃
+    if (row.role !== 'tool' && !row.text && !row.reasoning && !(row.images && row.images.length)) continue
     out.push(row)
   }
   return out
@@ -354,6 +388,15 @@ function createRuntime(ctx, config, disk) {
     tunnelState: 'off',
     tunnelError: null,
     tunnel: null,
+    // GitHub 地址同步：开发期兜底，隧道换地址后手机端从这里拉
+    publishToken: String(config?.publishToken ?? '') || String(disk.publishToken ?? ''),
+    publishRepo: String(config?.publishRepo ?? '') || String(disk.publishRepo ?? 'Lsty/dsh-pair-link'),
+    publishPath: String(config?.publishPath ?? '') || String(disk.publishPath ?? 'endpoint.json'),
+    publishPrivateKey: String(disk.publishPrivateKey ?? ''),
+    publishPublicKey: String(config?.publishPublicKey ?? '') || String(disk.publishPublicKey ?? ''),
+    publishStatus: '',
+    publishError: null,
+    signingKey: null,
     // host 侧
     clients: new Set(),
     approvals: new Map(),
@@ -455,6 +498,28 @@ function applySessionApi(ctx, runtime) {
       .slice(0, 120)
   }
 
+  /** 把消息里的图片引用读成 base64 内联，手机端才能直接显示。 */
+  async function inlineImages(messages) {
+    const attachments = ctx.get?.('attachments')
+    if (!attachments?.readImage) return
+    for (const message of messages) {
+      if (!Array.isArray(message.images) || message.images.length === 0) continue
+      const resolved = []
+      for (const ref of message.images) {
+        try {
+          const stored = await attachments.readImage(ref)
+          if (!stored || !stored.data) continue
+          if (stored.data.length > 2 * 1024 * 1024) {
+            resolved.push({ mediaType: ref.mediaType, tooLarge: true })
+            continue
+          }
+          resolved.push({ mediaType: ref.mediaType, data: Buffer.from(stored.data).toString('base64') })
+        } catch { /* 读不到就跳过这张 */ }
+      }
+      message.images = resolved
+    }
+  }
+
   async function readMessages(sessionId, options, signal) {
     const limit = Math.min(Math.max(Number(options?.limit ?? 40), 1), 200)
     const beforeSeq = options?.beforeSeq == null ? undefined : Number(options.beforeSeq)
@@ -480,7 +545,9 @@ function applySessionApi(ctx, runtime) {
       throw new Error('这个 DSH 版本没有可用的会话历史服务')
     }
 
-    return { messages: compactMessages(events.map(toDisplayMessage)), cursor }
+    const messages = compactMessages(events.map(toDisplayMessage))
+    await inlineImages(messages)
+    return { messages, cursor }
   }
 
   async function promptSession(sessionId, content) {
@@ -859,6 +926,10 @@ function applyHostRoutes(ctx, runtime, sessions) {
       tunnelState: runtime.tunnelState,
       tunnelError: runtime.tunnelError,
       packageVersion: localPackageVersion(),
+      publishable: Boolean(runtime.publishToken),
+      publishRepo: runtime.publishRepo,
+      publishStatus: runtime.publishStatus,
+      publishError: runtime.publishError,
     })
   })
 
@@ -920,6 +991,52 @@ function applyHostRoutes(ctx, runtime, sessions) {
     try {
       const result = await applySelfUpdate(runtime)
       return sendJson(res, 200, { ...result, local: localPackageVersion(), restartRequired: true })
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
+    }
+  })
+
+  // --- GitHub 地址同步：检查当前发布状态 / 手机端拉取 / 电脑端手动发布 ---
+  route('exact', '/dsh-pair/api/endpoint', (req, res) => {
+    cors(res)
+    if (!authorize(req)) return sendJson(res, 401, { ok: false, error: 'unauthorized' })
+    sendJson(res, 200, {
+      ok: true,
+      repo: runtime.publishRepo,
+      path: runtime.publishPath,
+      publicUrl: runtime.publicUrl,
+      publishable: Boolean(runtime.publishToken),
+      publishStatus: runtime.publishStatus,
+      publishError: runtime.publishError,
+      publicKey: runtime.publishPrivateKey ? (() => {
+        try { return ensureSigningKey(runtime).publicKey } catch { return '' }
+      })() : '',
+    })
+  })
+
+  route('exact', '/dsh-pair/sync-endpoint', async (req, res) => {
+    cors(res)
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+      return sendJson(res, 403, { ok: false, error: 'bad page token' })
+    }
+    try {
+      const result = await syncEndpoint(ctx, runtime)
+      return sendJson(res, 200, { ok: true, ...result })
+    } catch (err) {
+      return sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
+    }
+  })
+
+  route('exact', '/dsh-pair/publish', async (req, res) => {
+    cors(res)
+    if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+      return sendJson(res, 403, { ok: false, error: 'bad page token' })
+    }
+    try {
+      await publishEndpoint(runtime)
+      return sendJson(res, 200, { ok: true, repo: runtime.publishRepo, path: runtime.publishPath, url: runtime.publicUrl })
     } catch (err) {
       return sendJson(res, 500, { ok: false, error: String(err?.message ?? err) })
     }
@@ -1207,6 +1324,10 @@ function startQuickTunnel(ctx, runtime) {
       runtime.tunnelState = 'ready'
       if (runtime.tunnelTimer) { clearTimeout(runtime.tunnelTimer); runtime.tunnelTimer = null }
       ctx.logger?.info?.('dsh-pair-link: 专用隧道就绪 %s', runtime.publicUrl)
+      void publishEndpoint(runtime).catch((err) => {
+        runtime.publishError = String(err?.message ?? err)
+        ctx.logger?.warn?.('dsh-pair-link: 地址发布失败：%s', runtime.publishError)
+      })
     }
     if (!settled && /failed to|unauthorized|error/i.test(text)) {
       runtime.tunnelError = text.trim().slice(0, 240)
@@ -1331,6 +1452,132 @@ async function applySelfUpdate(runtime) {
     files: downloaded.map((item) => item.path),
     backup: backupDir,
   }
+}
+
+// ---------------------------------------------------------------------------
+// GitHub 地址同步：电脑发布（带 ed25519 签名），手机连不上时来拉
+// ---------------------------------------------------------------------------
+function endpointPayload(device, url, ts) {
+  return `${device ?? ''}|${url ?? ''}|${ts ?? ''}`
+}
+
+function ensureSigningKey(runtime) {
+  if (runtime.signingKey) return runtime.signingKey
+  let pem = runtime.publishPrivateKey
+  if (!pem) {
+    const pair = generateKeyPairSync('ed25519')
+    pem = pair.privateKey.export({ type: 'pkcs8', format: 'pem' }).toString()
+    runtime.publishPrivateKey = pem
+    try { writeDiskConfig({ publishPrivateKey: pem }) } catch { /* ignore */ }
+    runtime.signingKey = {
+      privateKey: pair.privateKey,
+      publicKey: pair.publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    }
+    return runtime.signingKey
+  }
+  try {
+    const privateKey = createPrivateKey(pem)
+    runtime.signingKey = {
+      privateKey,
+      publicKey: createPublicKey(privateKey).export({ type: 'spki', format: 'pem' }).toString(),
+    }
+    return runtime.signingKey
+  } catch {
+    runtime.signingKey = null
+    throw new Error('本机签名私钥损坏：删掉配置里的 publishPrivateKey 再试')
+  }
+}
+
+async function publishEndpoint(runtime) {
+  if (!runtime.publishToken || !runtime.publishRepo || !runtime.publicUrl) return
+  const key = ensureSigningKey(runtime)
+  const device = hostname()
+  const ts = Date.now()
+  const sig = sign(null, Buffer.from(endpointPayload(device, runtime.publicUrl, ts)), key.privateKey).toString('base64')
+  const body = { device, url: runtime.publicUrl, ts, publicKey: key.publicKey, sig }
+  const api = `https://api.github.com/repos/${runtime.publishRepo}/contents/${runtime.publishPath}`
+  const headers = {
+    authorization: `Bearer ${runtime.publishToken}`,
+    accept: 'application/vnd.github+json',
+    'user-agent': 'dsh-pair-link',
+    'x-github-api-version': '2022-11-28',
+  }
+
+  let sha
+  try {
+    const current = await fetch(api, { headers, signal: AbortSignal.timeout(8000) })
+    if (current.ok) {
+      const json = await current.json()
+      sha = json?.sha
+    }
+  } catch { /* 当作新文件 */ }
+
+  const res = await fetch(api, {
+    method: 'PUT',
+    headers: { ...headers, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      message: 'chore: publish dsh-pair-link endpoint',
+      content: Buffer.from(`${JSON.stringify(body, null, 2)}\n`).toString('base64'),
+      ...(sha ? { sha } : {}),
+    }),
+    signal: AbortSignal.timeout(12_000),
+  })
+  if (!res.ok) throw new Error(`GitHub 发布失败：HTTP ${res.status}`)
+  runtime.publishStatus = `已发布 ${new Date().toISOString()}`
+  runtime.publishError = null
+}
+
+async function syncEndpoint(ctx, runtime) {
+  if (!runtime.publishRepo) throw new Error('还没有配置地址仓库')
+  const api = `https://api.github.com/repos/${runtime.publishRepo}/contents/${runtime.publishPath}`
+  const res = await fetch(api, {
+    headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-pair-link' },
+    signal: AbortSignal.timeout(10_000),
+  })
+  if (!res.ok) throw new Error(`读 GitHub 失败：HTTP ${res.status}`)
+  const json = await res.json()
+  let endpoint
+  try {
+    endpoint = JSON.parse(Buffer.from(String(json?.content ?? ''), 'base64').toString('utf8'))
+  } catch {
+    throw new Error('地址文件不是合法 JSON')
+  }
+  const device = endpoint?.device
+  const url = endpoint?.url
+  const ts = endpoint?.ts
+  const publicKey = endpoint?.publicKey
+  const sig = endpoint?.sig
+  if (!url || !publicKey || !sig || !ts) throw new Error('地址文件缺字段')
+
+  let ok = false
+  try {
+    ok = verify(
+      null,
+      Buffer.from(endpointPayload(device, url, ts)),
+      createPublicKey(publicKey),
+      Buffer.from(String(sig), 'base64'),
+    )
+  } catch {
+    ok = false
+  }
+  if (!ok) throw new Error('签名校验失败，地址可能被改过')
+
+  if (runtime.publishPublicKey && runtime.publishPublicKey !== publicKey) {
+    throw new Error('公钥和上次记录的不一致，拒绝使用')
+  }
+  if (!runtime.publishPublicKey) {
+    runtime.publishPublicKey = publicKey
+    try { writeDiskConfig({ publishPublicKey: publicKey }) } catch { /* ignore */ }
+  }
+
+  const remote = resolveRemote(url, runtime.remote?.bridgeToken ?? '')
+  if (!remote) throw new Error('地址无法解析')
+  runtime.remote = remote
+  runtime.lastError = null
+  runtime.reconnects = 0
+  try { writeDiskConfig({ pairUrl: url }) } catch { /* ignore */ }
+  restartPairing(ctx, runtime)
+  return { url, device, ts }
 }
 
 /** 电脑前面有 dsh-bridge 之类的登录墙时，用访问密码换一个会话 cookie。 */

@@ -230,6 +230,10 @@ window.__ModuleLoader__.load({
 }
 .pair-attach-remove:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
+.pair-images { display: flex; flex-wrap: wrap; gap: 4px; }
+.pair-image { display: block; max-width: 100%; max-height: 260px; border-radius: var(--dsw-radius-md); }
+.pair-image-note { font-size: 11px; color: var(--dsw-alias-label-tertiary); }
+
 .pair-reasoning {
   margin: 2px 0 4px;
   padding: 8px 10px;
@@ -783,8 +787,30 @@ window.__ModuleLoader__.load({
         open ? h('div', { className: 'pair-reasoning' }, text) : null)
     }
 
+    function ImageGroup({ images }) {
+      if (!Array.isArray(images) || images.length === 0) return null
+      return h('div', { className: 'pair-images' },
+        images.map((image, index) => {
+          if (!image || image.tooLarge) {
+            return h('div', { key: `large-${index}`, className: 'pair-image-note' }, '[图片过大，未内联显示]')
+          }
+          const src = `data:${image.mediaType || 'image/png'};base64,${image.data || ''}`
+          return h('img', {
+            key: `img-${index}`,
+            src,
+            alt: '',
+            className: 'pair-image',
+            loading: 'lazy',
+          })
+        }))
+    }
+
     function MessageBubble({ message }) {
       const role = message.role
+      if (role === 'tool-image') {
+        return h('div', { style: { alignSelf: 'flex-start', maxWidth: '88%' } },
+          h(ImageGroup, { images: message.images }))
+      }
       if (role === 'system') {
         return h('div', {
           style: {
@@ -829,6 +855,7 @@ window.__ModuleLoader__.load({
           },
         }, message.text)
         : null,
+      h(ImageGroup, { images: message.images }),
       h('div', {
         style: {
           fontSize: 10, color: 'var(--dsw-alias-label-tertiary)',
@@ -1123,6 +1150,8 @@ window.__ModuleLoader__.load({
     // -----------------------------------------------------------------------
     function TunnelCard({ info }) {
       const [copied, setCopied] = React.useState(false)
+      const [publishing, setPublishing] = React.useState(false)
+      const [publishMsg, setPublishMsg] = React.useState(null)
       const url = info && info.publicUrl ? info.publicUrl : ''
       const state = (info && info.tunnelState) || 'off'
       const tone = state === 'ready' ? 'ok' : state === 'starting' ? 'warn' : state === 'error' ? 'error' : 'idle'
@@ -1142,6 +1171,19 @@ window.__ModuleLoader__.load({
           setTimeout(() => setCopied(false), 2000)
         } catch {
           if (typeof window !== 'undefined' && window.prompt) window.prompt('复制这个地址：', url)
+        }
+      }
+
+      const publish = async () => {
+        setPublishing(true)
+        setPublishMsg(null)
+        try {
+          await callJson('', '/dsh-pair/publish', { method: 'POST' })
+          setPublishMsg('已发布到 GitHub')
+        } catch (err) {
+          setPublishMsg('发布失败：' + String(err && err.message ? err.message : err))
+        } finally {
+          setPublishing(false)
         }
       }
 
@@ -1174,6 +1216,16 @@ window.__ModuleLoader__.load({
             info && info.tunnelError
               ? `没拿到地址：${info.tunnelError}`
               : '没拿到公网地址，检查 cloudflared 是否安装、网络是否放行。')
+          : null,
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+          h('span', { className: 'pair-hint', style: { flex: 1 } },
+            info && info.publishable ? '地址会自动发到 GitHub' : '想自动同步地址？在配置里填 publishToken'),
+          info && info.publishable
+            ? h(Button, { kind: 'outline', size: 'sm', onClick: publish, disabled: publishing || !url },
+              publishing ? '发布中…' : '立即发布')
+            : null),
+        publishMsg
+          ? h('div', { className: publishMsg.startsWith('发布失败') ? 'pair-error' : 'pair-hint' }, publishMsg)
           : null,
         h('div', { className: 'pair-hint' },
           '手机端「连接电脑」填这个地址 + 配对密钥。重启 DSH 后地址会变，回到这里复制新的。'))
@@ -1236,6 +1288,31 @@ window.__ModuleLoader__.load({
             busy ? '更新中…' : '从电脑更新')
           : null),
       message ? h('div', { className: message.startsWith('更新失败') ? 'pair-error' : 'pair-hint' }, message) : null)
+    }
+
+    /** 连不上时从 GitHub 拉电脑发布的地址（带签名校验）。 */
+    function SyncEndpointButton({ onSynced }) {
+      const [busy, setBusy] = React.useState(false)
+      const [msg, setMsg] = React.useState(null)
+
+      const sync = async () => {
+        setBusy(true)
+        setMsg(null)
+        try {
+          const body = await callJson('', '/dsh-pair/sync-endpoint', { method: 'POST' })
+          setMsg(`已同步：${body.url}`)
+          if (onSynced) onSynced()
+        } catch (err) {
+          setMsg('同步失败：' + String(err && err.message ? err.message : err))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      return h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' } },
+        h(Button, { kind: 'outline', size: 'sm', onClick: sync, disabled: busy },
+          busy ? '同步中…' : '从 GitHub 同步地址'),
+        msg ? h('div', { className: msg.startsWith('同步失败') ? 'pair-error' : 'pair-hint' }, msg) : null)
     }
 
     // -----------------------------------------------------------------------
@@ -1397,8 +1474,11 @@ window.__ModuleLoader__.load({
                   background: 'var(--dsw-alias-bg-layer-1)',
                   boxShadow: 'inset 0 0 0 .5px var(--dsw-alias-border-l1)',
                   flex: '0 0 auto',
+                  display: 'flex', flexDirection: 'column', gap: 8,
                 },
-              }, treeError)
+              },
+              h('div', null, treeError),
+              h(SyncEndpointButton, { onSynced: refreshNow }))
               : null,
             h('div', {
               style: {
