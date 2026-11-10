@@ -253,6 +253,34 @@ function applyHost(ctx, { secret, wsPath }) {
     },
   }))
 
+  // 测试端点：手动注入一条 approval，验证手机端卡片与按钮回传
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact',
+    path: '/dsh-pair/simulate',
+    handler: async (req, res) => {
+      if (clients.size === 0) return sendJson(res, 409, { ok: false, error: 'no client connected' })
+      const id = randomUUID()
+      const decision = new Promise((resolve) => { pending.set(id, resolve) })
+      broadcast({
+        type: 'approval',
+        id,
+        toolName: 'simulate.write-file',
+        reason: '这是电脑发来的一条测试审批请求，点「允许」或「拒绝」即可。',
+        displayReason: null,
+        callId: null,
+        sessionId: null,
+        at: Date.now(),
+      })
+      let timer
+      const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve(null), 45_000) })
+      const outcome = await Promise.race([decision, timeout])
+      clearTimeout(timer)
+      pending.delete(id)
+      if (outcome) state.approvalsAnswered += 1
+      return sendJson(res, 200, { ok: true, id, outcome: outcome ?? 'timeout' })
+    },
+  }))
+
   ctx.effect(() => ctx.on('approval/request', async (req, next) => {
     try {
       if (clients.size === 0) return next()
