@@ -1099,18 +1099,20 @@ window.__ModuleLoader__.load({
       const send = async () => {
         const text = draft.trim()
         if ((!text && pending.length === 0) || sending) return
+        const outgoing = pending
         setSending(true)
         setError(null)
+        let sent = false
         try {
-          if (pending.length > 0) {
+          if (outgoing.length > 0) {
             await callJson(base, `/sessions/${encodeURIComponent(session.id)}/upload`, {
               method: 'POST',
               body: JSON.stringify({
                 text,
-                images: pending
+                images: outgoing
                   .filter((item) => item.kind === 'image')
                   .map((item) => ({ name: item.name, mediaType: item.mediaType, data: item.data })),
-                files: pending
+                files: outgoing
                   .filter((item) => item.kind !== 'image')
                   .map((item) => ({ name: item.name, data: item.data })),
               }),
@@ -1121,6 +1123,7 @@ window.__ModuleLoader__.load({
               body: JSON.stringify({ text }),
             })
           }
+          sent = true
           setDraft('')
           setPending([])
           stickToBottom.current = true
@@ -1129,6 +1132,11 @@ window.__ModuleLoader__.load({
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
         } finally {
+          // 已经发出去了就一定要清干净，别让残留盖住下一轮输入
+          if (sent) {
+            setDraft('')
+            setPending([])
+          }
           setSending(false)
         }
       }

@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.6'
+const VERSION = '0.4.7'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -1704,48 +1704,77 @@ async function publishEndpoint(runtime) {
   runtime.publishError = null
 }
 
+/**
+ * 多个源并行读端点文件：手机网络到 api.github.com 可能不通，
+ * 镜像源（ghfast / gitmirror）通常可达。谁先成功用谁。
+ */
+function endpointSources(repo, path) {
+  return [
+    `https://api.github.com/repos/${repo}/contents/${path}?ref=main`,
+    `https://ghfast.top/https://raw.githubusercontent.com/${repo}/main/${path}`,
+    `https://raw.gitmirror.com/${repo}/main/${path}`,
+    `https://raw.githubusercontent.com/${repo}/main/${path}`,
+  ]
+}
+
 async function fetchEndpointFromGitHub(runtime) {
   const repo = runtime.publishRepo || 'Lsty/dsh-pair-link'
   const path = runtime.publishPath || 'endpoint.json'
-  const api = `https://api.github.com/repos/${repo}/contents/${path}?ref=main`
-  const res = await fetch(api, {
-    headers: { accept: 'application/vnd.github+json', 'user-agent': 'dsh-pair-link' },
-    signal: AbortSignal.timeout(8000),
-  })
-  if (!res.ok) throw new Error(`读 GitHub 失败：HTTP ${res.status}`)
-  const json = await res.json()
-  let endpoint
+  const sources = endpointSources(repo, path)
+
+  const loadOne = async (url) => {
+    const isApi = url.includes('api.github.com')
+    const res = await fetch(url, {
+      headers: isApi
+        ? { accept: 'application/vnd.github+json', 'user-agent': 'dsh-pair-link' }
+        : { 'user-agent': 'dsh-pair-link' },
+      signal: AbortSignal.timeout(8000),
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const text = await res.text()
+    let endpoint
+    if (isApi) {
+      const json = JSON.parse(text)
+      endpoint = JSON.parse(Buffer.from(String(json?.content ?? ''), 'base64').toString('utf8'))
+    } else {
+      endpoint = JSON.parse(text)
+    }
+    if (!endpoint || typeof endpoint.url !== 'string' || endpoint.url.length === 0) {
+      throw new Error('地址文件缺少 url')
+    }
+    // 旧文件可能没有签名字段；有就必须验过
+    if (endpoint.publicKey && endpoint.sig && endpoint.ts !== undefined) {
+      let ok = false
+      try {
+        ok = verify(
+          null,
+          Buffer.from(endpointPayload(endpoint.device, endpoint.url, endpoint.ts)),
+          createPublicKey(endpoint.publicKey),
+          Buffer.from(String(endpoint.sig), 'base64'),
+        )
+      } catch {
+        ok = false
+      }
+      if (!ok) throw new Error('签名校验失败，地址可能被改过')
+      if (runtime.publishPublicKey && runtime.publishPublicKey !== endpoint.publicKey) {
+        throw new Error('公钥和上次记录的不一致，拒绝使用')
+      }
+      if (!runtime.publishPublicKey) {
+        runtime.publishPublicKey = endpoint.publicKey
+        try { writeDiskConfig({ publishPublicKey: endpoint.publicKey }) } catch { /* ignore */ }
+      }
+    }
+    return endpoint
+  }
+
   try {
-    endpoint = JSON.parse(Buffer.from(String(json?.content ?? ''), 'base64').toString('utf8'))
-  } catch {
-    throw new Error('地址文件不是合法 JSON')
+    return await Promise.any(sources.map((url) => loadOne(url)))
+  } catch (err) {
+    const detail = err && err.errors
+      ? err.errors.map((item) => item?.message ?? String(item)).join('；')
+      : String(err?.message ?? err)
+    throw new Error(`所有端点源都失败：${detail}`)
   }
-  if (!endpoint || typeof endpoint.url !== 'string' || endpoint.url.length === 0) {
-    throw new Error('地址文件缺少 url')
-  }
-  // 旧文件可能没有签名字段；有就必须验过
-  if (endpoint.publicKey && endpoint.sig && endpoint.ts !== undefined) {
-    let ok = false
-    try {
-      ok = verify(
-        null,
-        Buffer.from(endpointPayload(endpoint.device, endpoint.url, endpoint.ts)),
-        createPublicKey(endpoint.publicKey),
-        Buffer.from(String(endpoint.sig), 'base64'),
-      )
-    } catch {
-      ok = false
-    }
-    if (!ok) throw new Error('签名校验失败，地址可能被改过')
-    if (runtime.publishPublicKey && runtime.publishPublicKey !== endpoint.publicKey) {
-      throw new Error('公钥和上次记录的不一致，拒绝使用')
-    }
-    if (!runtime.publishPublicKey) {
-      runtime.publishPublicKey = endpoint.publicKey
-      try { writeDiskConfig({ publishPublicKey: endpoint.publicKey }) } catch { /* ignore */ }
-    }
-  }
-  return endpoint
 }
 
 function endpointStamp(endpoint) {
