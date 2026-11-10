@@ -406,6 +406,20 @@ window.__ModuleLoader__.load({
   flex: 0 0 auto;
 }
 .pair-ws-add:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.pair-ws-more {
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-size: 14px;
+  line-height: 18px;
+  width: 22px;
+  height: 22px;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.pair-ws-more:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
+.pair-menu-danger { color: var(--dsw-alias-state-error-primary) !important; }
 .pair-row-more {
   border: none;
   background: transparent;
@@ -823,6 +837,12 @@ window.__ModuleLoader__.load({
         tabIndex: 0,
         onClick: () => onOpen(session.id),
         onKeyDown: (e) => { if (e.key === 'Enter') onOpen(session.id) },
+        onContextMenu: onMenu
+          ? (e) => {
+            e.preventDefault()
+            onMenu(session, e.currentTarget.getBoundingClientRect())
+          }
+          : undefined,
       },
       h('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, flex: 1, minWidth: 0 } },
         h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
@@ -856,7 +876,7 @@ window.__ModuleLoader__.load({
       active ? h('span', { style: { color: 'var(--dsw-alias-state-business-primary)', fontSize: 13 } }, '•') : null)
     }
 
-    function WorkspaceTree({ tree, activeId, onOpen, collapsed, onToggle, q, onQuery, onCreate, onMenu }) {
+    function WorkspaceTree({ tree, activeId, onOpen, collapsed, onToggle, q, onQuery, onCreate, onMenu, onWorkspaceMenu }) {
       if (!tree) return h(Empty, null, '正在读取工作区…')
       const workspaces = tree.workspaces || []
       const others = tree.others || []
@@ -889,6 +909,18 @@ window.__ModuleLoader__.load({
                   title: '在这个工作区新建会话',
                   onClick: () => onCreate(workspaceId),
                 }, '＋')
+                : null,
+              workspaceId && onWorkspaceMenu
+                ? h('button', {
+                  type: 'button',
+                  className: 'pair-ws-more',
+                  title: '工作区操作',
+                  onClick: (e) => {
+                    e.stopPropagation()
+                    const rect = e.currentTarget.getBoundingClientRect()
+                    onWorkspaceMenu({ id: workspaceId, title: label }, rect)
+                  },
+                }, '⋯')
                 : null)
             : h('div', { className: 'pair-ws', style: { cursor: 'default' } },
               h('span', { className: 'pair-ws-caret' }),
@@ -1802,6 +1834,37 @@ window.__ModuleLoader__.load({
       const [collapsed, setCollapsed] = React.useState(() => new Set())
       const [q, setQ] = React.useState('')
       const [menuTarget, setMenuTarget] = React.useState(null)
+      const [wsMenuTarget, setWsMenuTarget] = React.useState(null)
+
+      const renameWorkspace = async (workspace) => {
+        setWsMenuTarget(null)
+        const next = window.prompt('新的工作区名称', workspace.title || '')
+        if (next === null) return
+        const title = next.trim()
+        if (!title) return
+        try {
+          await callJson('', `/dsh-pair/api/workspaces/${encodeURIComponent(workspace.id)}/rename`, {
+            method: 'POST',
+            body: JSON.stringify({ title }),
+          })
+          await loadTree()
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      const deleteWorkspace = async (workspace) => {
+        setWsMenuTarget(null)
+        if (!window.confirm(`删除工作区「${workspace.title}」？会话和文件都会保留。`)) return
+        try {
+          await callJson('', `/dsh-pair/api/workspaces/${encodeURIComponent(workspace.id)}/delete`, {
+            method: 'POST',
+          })
+          await loadTree()
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
 
       const createIn = async (workspaceId) => {
         try {
@@ -1867,6 +1930,30 @@ window.__ModuleLoader__.load({
           })
           await loadTree()
           if (body && body.sessionId) setActiveId(body.sessionId)
+        } catch (err) {
+          setTreeError(String(err && err.message ? err.message : err))
+        }
+      }
+
+      const moveSession = async (session, direction) => {
+        setMenuTarget(null)
+        const groups = (tree && tree.workspaces ? tree.workspaces : [])
+          .map((workspace) => ({ id: workspace.id, sessions: workspace.sessions || [] }))
+        const group = groups.find((item) => item.sessions.some((row) => row.id === session.id))
+        if (!group) return
+        const list = group.sessions
+        const index = list.findIndex((row) => row.id === session.id)
+        const target = index + direction
+        if (target < 0 || target >= list.length) return
+        const beforeSessionId = direction < 0
+          ? list[target].id
+          : (list[target + 1] ? list[target + 1].id : '')
+        try {
+          await callJson('', `/dsh-pair/api/workspaces/${encodeURIComponent(group.id)}/move-session`, {
+            method: 'POST',
+            body: JSON.stringify({ sessionId: session.id, beforeSessionId }),
+          })
+          await loadTree()
         } catch (err) {
           setTreeError(String(err && err.message ? err.message : err))
         }
@@ -2061,6 +2148,11 @@ window.__ModuleLoader__.load({
                 left: Math.max(8, Math.min(rect.right - 160, window.innerWidth - 172)),
                 top: Math.min(rect.bottom + 4, window.innerHeight - 220),
               }),
+              onWorkspaceMenu: (workspace, rect) => setWsMenuTarget({
+                workspace,
+                left: Math.max(8, Math.min(rect.right - 160, window.innerWidth - 172)),
+                top: Math.min(rect.bottom + 4, window.innerHeight - 160),
+              }),
             }),
             isHost
               ? h('div', { className: 'pair-hint', style: { paddingTop: 2, flex: '0 0 auto' } },
@@ -2117,10 +2209,40 @@ window.__ModuleLoader__.load({
           },
           onClick: (e) => e.stopPropagation(),
         },
-        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => renameSession(menuTarget.session) }, '改名'),
-        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => pinSession(menuTarget.session) }, '固定'),
-        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => forkSession(menuTarget.session) }, '分叉'),
-        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => archiveSession(menuTarget.session) }, '归档')))
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => renameSession(menuTarget.session) }, '重命名'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => pinSession(menuTarget.session) }, '置顶会话'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => moveSession(menuTarget.session, -1) }, '上移'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => moveSession(menuTarget.session, 1) }, '下移'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => forkSession(menuTarget.session) }, '分叉会话'),
+        h('button', {
+          type: 'button',
+          className: 'pair-menu-item',
+          onClick: () => {
+            try { navigator.clipboard?.writeText(menuTarget.session.id) } catch { /* ignore */ }
+            setMenuTarget(null)
+          },
+        }, '复制 Session ID'),
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => archiveSession(menuTarget.session) }, '归档会话')))
+        : null,
+      wsMenuTarget
+        ? h('div', {
+          style: { position: 'fixed', inset: 0, zIndex: 500 },
+          onClick: () => setWsMenuTarget(null),
+        },
+        h('div', {
+          className: 'pair-menu',
+          style: {
+            position: 'fixed',
+            left: wsMenuTarget.left,
+            top: wsMenuTarget.top,
+            width: 156,
+            padding: 4,
+            zIndex: 501,
+          },
+          onClick: (e) => e.stopPropagation(),
+        },
+        h('button', { type: 'button', className: 'pair-menu-item', onClick: () => renameWorkspace(wsMenuTarget.workspace) }, '重命名'),
+        h('button', { type: 'button', className: 'pair-menu-item pair-menu-danger', onClick: () => deleteWorkspace(wsMenuTarget.workspace) }, '删除工作区')))
         : null)
     }
 

@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.18'
+const VERSION = '0.4.19'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 15 * 60_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -951,6 +951,34 @@ function applySessionApi(ctx, runtime) {
     return { workspace: result?.workspace ?? null }
   }
 
+  async function deleteWorkspace(workspaceId) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.delete) throw new Error('这个 DSH 版本没有删除工作区接口')
+    const result = await workspaces.delete({ workspaceId })
+    return { deleted: Boolean(result?.deleted) }
+  }
+
+  async function moveWorkspace(workspaceId, beforeWorkspaceId) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.insertBefore) throw new Error('这个 DSH 版本没有工作区排序接口')
+    const result = await workspaces.insertBefore({
+      workspaceId,
+      ...(beforeWorkspaceId ? { beforeWorkspaceId } : {}),
+    })
+    return { workspaceIds: result?.workspaceIds ?? [] }
+  }
+
+  async function moveSession(workspaceId, sessionId, beforeSessionId) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.insertSessionBefore) throw new Error('这个 DSH 版本没有会话排序接口')
+    const result = await workspaces.insertSessionBefore({
+      workspaceId,
+      sessionId,
+      ...(beforeSessionId ? { beforeSessionId } : {}),
+    })
+    return { ok: true }
+  }
+
   /** 读一次工作区 baseline，拿到归档/固定集合。 */
   async function readWorkspaceMarks() {
     const workspaces = ctx.get?.('workspaceController')
@@ -987,6 +1015,9 @@ function applySessionApi(ctx, runtime) {
     archiveSession,
     pinSession,
     renameWorkspace,
+    deleteWorkspace,
+    moveWorkspace,
+    moveSession,
     readWorkspaceMarks,
     buildTree,
     sessionMeta,
@@ -1086,6 +1117,37 @@ function applyHostRoutes(ctx, runtime, sessions) {
         let body
         try { body = JSON.parse(raw || '{}') } catch { body = {} }
         const result = await sessions.renameWorkspace(decodeURIComponent(segments[1]), String(body?.title ?? ''))
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length >= 3 && segments[0] === 'workspaces' && segments[2] === 'delete') {
+        const result = await sessions.deleteWorkspace(decodeURIComponent(segments[1]))
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length >= 3 && segments[0] === 'workspaces' && segments[2] === 'move') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = await sessions.moveWorkspace(
+          decodeURIComponent(segments[1]),
+          body?.beforeWorkspaceId ? String(body.beforeWorkspaceId) : '',
+        )
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length >= 3 && segments[0] === 'workspaces' && segments[2] === 'move-session') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = await sessions.moveSession(
+          decodeURIComponent(segments[1]),
+          String(body?.sessionId ?? ''),
+          body?.beforeSessionId ? String(body.beforeSessionId) : '',
+        )
         sendJson(res, 200, { ok: true, ...result })
         return
       }
