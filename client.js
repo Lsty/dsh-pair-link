@@ -1181,28 +1181,29 @@ window.__ModuleLoader__.load({
       const [showTools, setShowTools] = React.useState(false)
       const [pending, setPending] = React.useState([])
       const [answering, setAnswering] = React.useState(null)
-      const [showAll, setShowAll] = React.useState(false)
+      const [visibleCount, setVisibleCount] = React.useState(24)
+      const [pageLimit, setPageLimit] = React.useState(60)
       const scrollRef = React.useRef(null)
       const stickToBottom = React.useRef(true)
       const fileRef = React.useRef(null)
 
       const load = React.useCallback(async () => {
         try {
-          const body = await callJson(base, `/sessions/${encodeURIComponent(session.id)}/messages?limit=60`)
+          const body = await callJson(base, `/sessions/${encodeURIComponent(session.id)}/messages?limit=${pageLimit}`)
           setMessages(Array.isArray(body.messages) ? body.messages : [])
           setError(null)
           setRefreshedAt(Date.now())
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
         }
-      }, [base, session.id])
+      }, [base, session.id, pageLimit])
 
       const loadMeta = React.useCallback(async () => {
         try {
           const body = await callJson(base, `/sessions/${encodeURIComponent(session.id)}/meta`)
           setMeta(body)
         } catch { /* 元信息失败不挡消息 */ }
-      }, [base, session.id])
+      }, [base, session.id, pageLimit])
 
       React.useEffect(() => {
         let alive = true
@@ -1437,18 +1438,23 @@ window.__ModuleLoader__.load({
           ? h(Empty, null, refreshedAt ? '这个会话还没有消息' : '正在读取…')
           : (() => {
             const filtered = messages.filter((message) => showTools || message.role !== 'tool')
-            const LIMIT = 24
-            const collapsible = filtered.length > LIMIT
-            const hidden = Math.max(0, filtered.length - LIMIT)
-            const visible = (showAll || !collapsible) ? filtered : filtered.slice(filtered.length - LIMIT)
+            const total = filtered.length
+            const shown = Math.min(visibleCount, total)
+            const hidden = total - shown
+            const visible = filtered.slice(hidden)
             return [
-              collapsible
+              hidden > 0
                 ? h('button', {
                   key: '__more',
                   type: 'button',
                   className: 'pair-more',
-                  onClick: () => setShowAll((value) => !value),
-                }, showAll ? '收起，只看最近 24 条' : `显示更早的 ${hidden} 条`)
+                  onClick: () => {
+                    if (visibleCount + 24 > total && pageLimit < 200) {
+                      setPageLimit((value) => Math.min(200, value + 60))
+                    }
+                    setVisibleCount((value) => Math.min(total, value + 24))
+                  },
+                }, `显示更早的 ${Math.min(24, hidden)} 条（还剩 ${hidden} 条）`)
                 : null,
               visible.map((message, index) => h(MessageBubble, {
                 key: `seq-${message.seq}-${message.role}`,
