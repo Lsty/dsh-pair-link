@@ -287,6 +287,28 @@ window.__ModuleLoader__.load({
 }
 .pair-more:hover { background: var(--dsw-alias-interactive-bg-hover); }
 
+.pair-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 8px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l1);
+}
+.pair-queue-title { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); }
+.pair-queue-item { display: flex; align-items: center; gap: 6px; }
+.pair-queue-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+}
+
 .pair-reasoning {
   margin: 2px 0 4px;
   padding: 8px 10px;
@@ -413,8 +435,17 @@ window.__ModuleLoader__.load({
       return parts[parts.length - 1] || text
     }
 
-    function readAsBase64(file) {
-      return new Promise((resolve, reject) => {
+    function queuedText(item) {
+      const blocks = Array.isArray(item && item.content) ? item.content : []
+      const text = blocks
+        .map((block) => (block && block.type === 'text' && typeof block.text === 'string' ? block.text : ''))
+        .filter(Boolean)
+        .join(' ')
+        .trim()
+      return text || '（非文本内容）'
+    }
+
+    function readAsBase64(file) {      return new Promise((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => {
           const result = String(reader.result || '')
@@ -1165,6 +1196,19 @@ window.__ModuleLoader__.load({
       }
 
       const running = meta ? Boolean(meta.running) : Boolean(session.running)
+      const queue = meta && Array.isArray(meta.queue) ? meta.queue : []
+
+      const updateQueueItem = async (itemId, action) => {
+        try {
+          await callJson(base, `/sessions/${encodeURIComponent(session.id)}/queue`, {
+            method: 'POST',
+            body: JSON.stringify({ itemId, action }),
+          })
+          await loadMeta()
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        }
+      }
 
       const headerRow = h('div', { style: { display: 'flex', alignItems: 'center', gap: 4, flex: '0 0 auto' } },
         narrow
@@ -1242,6 +1286,26 @@ window.__ModuleLoader__.load({
               })),
             ]
           })()),
+        queue.length > 0
+          ? h('div', { className: 'pair-queue' },
+            h('div', { className: 'pair-queue-title' }, `排队中 ${queue.length} 条`),
+            queue.map((item) => h('div', { key: item.id, className: 'pair-queue-item' },
+              h('span', { className: 'pair-queue-text', title: queuedText(item) }, queuedText(item)),
+              item.placement === 'steering'
+                ? h('span', { className: 'pair-hint' }, '转向中')
+                : h(Button, {
+                  kind: 'ghost',
+                  size: 'sm',
+                  onClick: () => updateQueueItem(item.id, { kind: 'steer' }),
+                  title: '现在插入到这一轮',
+                }, '提前'),
+              h(Button, {
+                kind: 'ghost',
+                size: 'sm',
+                onClick: () => updateQueueItem(item.id, { kind: 'remove' }),
+                title: '从队列里删掉',
+              }, '删除'))))
+          : null,
         pending.length > 0
           ? h('div', { className: 'pair-attach-row' },
             pending.map((item) => h('div', { key: item.key, className: 'pair-attach' },

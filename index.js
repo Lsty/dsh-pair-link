@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.5'
+const VERSION = '0.4.6'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 120_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -631,7 +631,7 @@ function applySessionApi(ctx, runtime) {
       sessionId,
       mode: 'queue',
       content: parts,
-    }, AbortSignal.timeout(20_000))
+    }, AbortSignal.timeout(60_000))
     return { accepted: true }
   }
 
@@ -802,7 +802,17 @@ function applySessionApi(ctx, runtime) {
       permission,
       running: Boolean(state?.running),
       pendingInput: state?.pendingInput ?? [],
+      queue: Array.isArray(state?.queue) ? state.queue : null,
     }
+  }
+
+  /** 操作排队中的发言：remove / steer / edit。 */
+  async function updateQueue(sessionId, itemId, action) {
+    const controller = controllerOf()
+    if (!controller?.updateQueue) throw new Error('这个 DSH 版本没有排队管理接口')
+    if (!itemId || !action || typeof action.kind !== 'string') throw new Error('缺少 itemId 或 action')
+    const result = await controller.updateQueue({ sessionId, itemId, action })
+    return { ok: true, ...result }
   }
 
   async function setSessionModel(sessionId, input) {
@@ -838,6 +848,7 @@ function applySessionApi(ctx, runtime) {
     answerQuestion,
     buildTree,
     sessionMeta,
+    updateQueue,
     setSessionModel,
     setSessionPermission,
   }
@@ -968,6 +979,15 @@ function applyHostRoutes(ctx, runtime, sessions) {
           let body
           try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
           const result = await sessions.answerQuestion(sessionId, String(body?.callId ?? ''), body?.answers)
+          sendJson(res, 200, { ok: true, ...result })
+          return
+        }
+
+        if (req.method === 'POST' && segments[2] === 'queue') {
+          const raw = await readBody(req)
+          let body
+          try { body = JSON.parse(raw) } catch { sendJson(res, 400, { ok: false, error: 'bad json' }); return }
+          const result = await sessions.updateQueue(sessionId, String(body?.itemId ?? ''), body?.action)
           sendJson(res, 200, { ok: true, ...result })
           return
         }
@@ -1865,7 +1885,7 @@ function applyProxy(ctx, runtime) {
 
     const forward = async (cookieValue) => {
       const controller = new AbortController()
-      const timer = setTimeout(() => controller.abort(), 25_000)
+      const timer = setTimeout(() => controller.abort(), 60_000)
       try {
         return await fetch(target, {
           method: req.method,
