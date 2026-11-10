@@ -445,6 +445,30 @@ window.__ModuleLoader__.load({
       return text || '（非文本内容）'
     }
 
+    /** 手机拍的图通常几 MB，先压到长边 1600 的 JPEG，上传快很多。 */
+    async function compressImage(file, maxEdge = 1600, quality = 0.82) {
+      try {
+        if (typeof createImageBitmap !== 'function') return null
+        const bitmap = await createImageBitmap(file)
+        const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height))
+        if (scale === 1 && file.size <= 400 * 1024) return null
+        const width = Math.max(1, Math.round(bitmap.width * scale))
+        const height = Math.max(1, Math.round(bitmap.height * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return null
+        ctx.fillStyle = '#fff'
+        ctx.fillRect(0, 0, width, height)
+        ctx.drawImage(bitmap, 0, 0, width, height)
+        const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', quality))
+        return blob || null
+      } catch {
+        return null
+      }
+    }
+
     function readAsBase64(file) {      return new Promise((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => {
@@ -892,8 +916,10 @@ window.__ModuleLoader__.load({
     function QuestionCard({ message, onAnswer, busy }) {
       const questions = Array.isArray(message.questions) ? message.questions : []
       const [selected, setSelected] = React.useState({})
+      const [custom, setCustom] = React.useState({})
       const [error, setError] = React.useState(null)
-      const pending = message.pending !== false
+      const [submitted, setSubmitted] = React.useState(false)
+      const pending = message.pending !== false && !submitted
 
       const toggle = (question, label) => {
         if (!pending) return
@@ -904,18 +930,26 @@ window.__ModuleLoader__.load({
             : [label]
           return { ...prev, [question.id]: next }
         })
+        setCustom((prev) => ({ ...prev, [question.id]: '' }))
       }
 
-      const ready = pending && questions.every((question) => (selected[question.id] || []).length > 0)
+      const answerOf = (question) => {
+        const typed = String(custom[question.id] || '').trim()
+        const picked = selected[question.id] || []
+        return { id: question.id, selected: picked, ...(typed ? { custom: typed } : {}) }
+      }
+
+      const ready = pending && questions.every((question) => {
+        const typed = String(custom[question.id] || '').trim()
+        return typed.length > 0 || (selected[question.id] || []).length > 0
+      })
 
       const submit = async () => {
         if (!ready || busy) return
         setError(null)
         try {
-          await onAnswer(message.callId, questions.map((question) => ({
-            id: question.id,
-            selected: selected[question.id] || [],
-          })))
+          await onAnswer(message.callId, questions.map(answerOf))
+          setSubmitted(true)
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
         }
@@ -939,6 +973,19 @@ window.__ModuleLoader__.load({
               },
               h('span', { className: 'pair-option-label' }, option.label),
               option.description ? h('span', { className: 'pair-option-desc' }, option.description) : null)))
+            : null,
+          pending
+            ? h('div', { className: 'pair-field', style: { marginTop: 2 } },
+              h('input', {
+                value: custom[question.id] || '',
+                placeholder: '其他（自己输入答案）',
+                disabled: busy,
+                onChange: (e) => {
+                  const value = e.target.value
+                  setCustom((prev) => ({ ...prev, [question.id]: value }))
+                  if (value.trim()) setSelected((prev) => ({ ...prev, [question.id]: [] }))
+                },
+              }))
             : null)),
         error ? h('div', { className: 'pair-error' }, error) : null,
         pending
@@ -1142,30 +1189,32 @@ window.__ModuleLoader__.load({
       }
 
       const addFiles = async (fileList) => {
-        const list = Array.from(fileList || []).slice(0, 4)
+        const list = Array.from(fileList || []).slice(0, 9)
         if (list.length === 0) return
         const next = []
         for (const file of list) {
-          if (file.size > 8 * 1024 * 1024) {
-            setError(`${file.name} 超过 8MB，已跳过`)
+          if (file.size > 24 * 1024 * 1024) {
+            setError(`${file.name} 超过 24MB，已跳过`)
             continue
           }
           try {
-            const data = await readAsBase64(file)
             const isImage = String(file.type || '').startsWith('image/')
+            const blob = isImage ? await compressImage(file) : null
+            const data = await readAsBase64(blob || file)
+            const mediaType = blob ? 'image/jpeg' : (file.type || 'application/octet-stream')
             next.push({
               key: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
               name: file.name || 'attachment',
-              mediaType: file.type || 'application/octet-stream',
+              mediaType,
               data,
               kind: isImage ? 'image' : 'file',
-              preview: isImage ? `data:${file.type};base64,${data}` : '',
+              preview: isImage ? `data:${mediaType};base64,${data}` : '',
             })
           } catch {
             setError(`读取 ${file.name} 失败`)
           }
         }
-        if (next.length) setPending((prev) => [...prev, ...next].slice(0, 4))
+        if (next.length) setPending((prev) => [...prev, ...next].slice(0, 9))
       }
 
       const removePending = (key) => {
