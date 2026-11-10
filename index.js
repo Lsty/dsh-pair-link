@@ -8,7 +8,7 @@
 // 零依赖：自带最小 WebSocket 服务端实现（RFC 6455 文本帧），
 // 因为 profile 用 link: 安装本地包时不会安装 dependencies。
 
-import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
@@ -362,6 +362,8 @@ function applyHost(ctx, { secret, wsPath }) {
 // client：手机侧
 // ---------------------------------------------------------------------------
 function applyClient(ctx, { secret, pairUrl }) {
+  // 页面令牌：只注入给本机 Web UI，请求 /inbox 与 /decide 时必须带
+  const localToken = randomBytes(16).toString('hex')
   const state = {
     startedAt: Date.now(),
     connected: false,
@@ -439,10 +441,17 @@ function applyClient(ctx, { secret, pairUrl }) {
     return { ok: true }
   }
 
+  ctx.effect(() => ctx.webServer.tapIndex((html) =>
+    html.replace('</head>', `<script>window.__DSH_PAIR_TOKEN__=${JSON.stringify(localToken)}</script></head>`),
+  ))
+
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact',
     path: '/dsh-pair/inbox',
     handler(req, res) {
+      if (req.headers['x-pair-token'] !== localToken) {
+        return sendJson(res, 403, { ok: false, error: 'missing or bad pair token' })
+      }
       sendJson(res, 200, {
         ok: true,
         plugin: name,
@@ -462,6 +471,9 @@ function applyClient(ctx, { secret, pairUrl }) {
     path: '/dsh-pair/decide',
     handler: async (req, res) => {
       if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
+      if (req.headers['x-pair-token'] !== localToken) {
+        return sendJson(res, 403, { ok: false, error: 'missing or bad pair token' })
+      }
       const raw = await readBody(req)
       let body
       try { body = JSON.parse(raw) } catch { return sendJson(res, 400, { ok: false, error: 'bad json' }) }
