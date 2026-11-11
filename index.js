@@ -279,6 +279,7 @@ function toDisplayMessage(event) {
           oldText,
           added,
           removed,
+          diff: diffLines(oldText, body),
           callId: String(data.callId ?? ''),
         }
       }
@@ -293,6 +294,7 @@ function toDisplayMessage(event) {
       time,
       role: 'tool',
       text: `${toolLabelOf(name)} · ${toolSummaryOf(name, parseToolArgs(data.arguments))}`,
+      callId: String(data.callId ?? ''),
     }
   }
   if (type === 'turn/end') {
@@ -335,6 +337,45 @@ function toolSummaryOf(name, args) {
     return fileTail(String(args?.file_path ?? args?.path ?? '')) || '文件'
   }
   return String(name ?? '工具')
+}
+
+/** 行级 diff（LCS）：给编辑卡展示改了哪几行。 */
+function diffLines(oldText, newText) {
+  const a = oldText ? String(oldText).split('\n') : []
+  const b = newText ? String(newText).split('\n') : []
+  const n = a.length
+  const m = b.length
+  if (n === 0 || m === 0) {
+    return [
+      ...a.map((text) => ({ type: 'del', text })),
+      ...b.map((text) => ({ type: 'add', text })),
+    ]
+  }
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0))
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1])
+    }
+  }
+  const out = []
+  let i = 0
+  let j = 0
+  while (i < n && j < m) {
+    if (a[i] === b[j]) {
+      out.push({ type: 'same', text: a[i] })
+      i += 1
+      j += 1
+    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
+      out.push({ type: 'del', text: a[i] })
+      i += 1
+    } else {
+      out.push({ type: 'add', text: b[j] })
+      j += 1
+    }
+  }
+  while (i < n) { out.push({ type: 'del', text: a[i] }); i += 1 }
+  while (j < m) { out.push({ type: 'add', text: b[j] }); j += 1 }
+  return out
 }
 
 /** 路径最后一段，用于工具行摘要。 */
@@ -725,15 +766,22 @@ function applySessionApi(ctx, runtime) {
 
     // 有 tool/result 的提问就是已经答过的，没有的才是待回答
     const answered = new Set()
+    const toolStates = new Map()
     for (const event of events) {
       if (event?.type === 'tool/result') {
         const callId = event.data?.message?.toolCallId
-        if (callId) answered.add(String(callId))
+        if (callId) {
+          answered.add(String(callId))
+          toolStates.set(String(callId), event.data?.message?.isError === true ? 'error' : 'ok')
+        }
       }
     }
     for (const message of messages) {
       if (message.role === 'question' && message.callId) {
         message.pending = !answered.has(message.callId)
+      }
+      if ((message.role === 'tool' || message.role === 'file-edit') && message.callId) {
+        message.state = toolStates.get(message.callId) || ''
       }
     }
 
@@ -1069,6 +1117,9 @@ function applySessionApi(ctx, runtime) {
     try {
       content = readFileSync(resolved, 'utf8')
     } catch (err) {
+      if (err && err.code === 'ENOENT') {
+        throw new Error(`文件不存在（可能已删除或移动）：${resolved}`)
+      }
       throw new Error(`读文件失败：${err?.message ?? err}`)
     }
     if (content.length > 400_000) throw new Error('文件太大（超过 400KB），请到电脑上查看')

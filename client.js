@@ -166,11 +166,17 @@ window.__ModuleLoader__.load({
 .pair-composer:focus-within { box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary); }
 .pair-composer-bar { display: flex; align-items: center; gap: 8px; }
 .pair-composer-bar .pair-tool {
-  height: 28px;
+  height: 30px;
   padding: 0 8px;
-  font-size: 11px;
-  max-width: 46%;
-  overflow: hidden;
+  font-size: 12px;
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: none;
+  justify-content: space-between;
+}
+.pair-composer-bar .pair-menu-anchor {
+  flex: 1 1 0;
+  min-width: 0;
 }
 .pair-icon-btn {
   width: 44px;
@@ -625,6 +631,22 @@ body.pair-modal-open .pair-modal { user-select: text; }
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.pair-tool-row[data-state="ok"] .pair-tool-caret { color: var(--dsw-alias-state-success-primary); }
+.pair-tool-row[data-state="error"] { color: var(--dsw-alias-state-error-primary); }
+.pair-diff {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 17px;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--dsw-alias-bg-layer-2);
+}
+.pair-diff-line { white-space: pre-wrap; word-break: break-word; }
+.pair-diff-add { color: var(--dsw-alias-state-success-primary); }
+.pair-diff-del { color: var(--dsw-alias-state-error-primary); }
+.pair-diff-same { color: var(--dsw-alias-label-tertiary); }
 .pair-thinking {
   display: flex;
   align-items: center;
@@ -742,7 +764,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.46'
+    const CLIENT_BUILD = '0.4.48'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1559,7 +1581,15 @@ body.pair-modal-open .pair-modal { user-select: text; }
               onClick: () => setOpen((value) => !value),
             }, open ? '⌄' : '›')
             : null),
-        open && content ? h('pre', { className: 'pair-file-code' }, content) : null,
+        open && content
+          ? (Array.isArray(message.diff) && message.diff.length > 0
+            ? h('div', { className: 'pair-diff' },
+              message.diff.map((line, index) => h('div', {
+                key: index,
+                className: `pair-diff-line pair-diff-${line.type}`,
+              }, `${line.type === 'add' ? '+' : (line.type === 'del' ? '-' : ' ')} ${line.text}`)))
+            : h('pre', { className: 'pair-file-code' }, content))
+          : null,
         h(FilePreviewModal, { preview, onClose: () => setPreview(null), base }))
     }
 
@@ -1694,8 +1724,9 @@ body.pair-modal-open .pair-modal { user-select: text; }
         }, message.text)
       }
       if (role === 'tool') {
-        return h('div', { className: 'pair-tool-row' },
-          h('span', { className: 'pair-tool-caret' }, '▸'),
+        return h('div', { className: 'pair-tool-row', 'data-state': message.state || '' },
+          h('span', { className: 'pair-tool-caret' },
+            message.state === 'error' ? '✗' : (message.state === 'ok' ? '✓' : '▸')),
           h('span', { className: 'pair-tool-text' }, message.text))
       }
       const mine = role === 'user'
@@ -1993,7 +2024,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
             display: 'flex',
             flexDirection: 'column',
             gap: 8,
-            padding: '4px 2px 8px',
+            padding: '12px 4px 8px',
           },
         },
         messages.length === 0
@@ -2100,8 +2131,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
             }, '＋'),
             h(PermissionPicker, { meta, onPick: pickPermission }),
             h(ModelPicker, { meta, onPick: pickModel }),
-            h('span', { className: 'pair-hint', style: { flex: 1, minWidth: 0 } },
-              pending.length > 0 ? `${pending.length} 个附件` : ''),
+            h('span', { style: { flex: 1 } }),
             h('button', {
               type: 'button',
               className: 'pair-send-btn',
