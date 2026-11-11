@@ -715,8 +715,8 @@ window.__ModuleLoader__.load({
     // -----------------------------------------------------------------------
     // 基础
     // -----------------------------------------------------------------------
-    // 页面（client.js）自身的构建版本：用来判断页面是否已经换到新代码。
-    const CLIENT_BUILD = '0.4.33'
+    // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
+    const CLIENT_BUILD = '0.4.37'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -2489,7 +2489,7 @@ window.__ModuleLoader__.load({
                 fontWeight: 400, fontSize: 11, marginLeft: 6,
                 color: 'var(--dsw-alias-label-tertiary)',
               },
-            }, `v${info && info.version ? info.version : CLIENT_BUILD}`)),
+            }, `v${CLIENT_BUILD}`)),
           h('div', {
             style: {
               fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)',
@@ -2499,7 +2499,9 @@ window.__ModuleLoader__.load({
           h(Dot, { tone: statusTone }),
           isHost
             ? (info.configured ? `${info.clients || 0} 台设备 · 主机模式` : '未配置配对密钥')
-            : (treeError ? '连不上电脑' : (linked ? '已连上电脑' : '未配对')))),
+            : (treeError
+              ? '连不上电脑'
+              : (linked ? `已连上电脑 · 电脑 v${info.version || '?'}` : '未配对')))),
         h(Button, {
           kind: 'ghost',
           size: 'sm',
