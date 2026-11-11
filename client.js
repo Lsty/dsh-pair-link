@@ -2206,9 +2206,10 @@ window.__ModuleLoader__.load({
 
       const treePane = h('div', { className: 'pair-tree-pane' },
         showConfig
-          ? h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } })
+          ? h(React.Fragment, null,
+            h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } }),
+            isHost ? h(TunnelCard, { info }) : null)
           : h(React.Fragment, null,
-            isHost ? h(TunnelCard, { info }) : null,
             treeError
               ? h('div', {
                 style: {
