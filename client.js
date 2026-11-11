@@ -57,7 +57,7 @@ window.__ModuleLoader__.load({
   width: 100%;
   box-sizing: border-box;
   min-width: 0;
-  min-height: 40px;
+  min-height: 44px;
   padding: 6px 10px;
   border: none;
   border-radius: var(--dsw-radius-md);
@@ -72,8 +72,8 @@ window.__ModuleLoader__.load({
 }
 .pair-row:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .pair-row[data-active="true"] { background: var(--dsw-alias-interactive-bg-active); }
-.pair-row-title { font-size: 13px; line-height: 20px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pair-row-meta { font-size: 11px; line-height: 16px; color: var(--dsw-alias-label-tertiary); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.pair-row-title { font-size: 15px; line-height: 22px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair-row-meta { font-size: 12px; line-height: 18px; color: var(--dsw-alias-label-tertiary); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .pair-chevron { color: var(--dsw-alias-label-tertiary); font-size: 15px; flex: 0 0 auto; }
 
 .pair-ws {
@@ -143,8 +143,8 @@ window.__ModuleLoader__.load({
   background: transparent;
   color: var(--dsw-alias-label-primary);
   font-family: inherit;
-  font-size: 14px;
-  line-height: 22px;
+  font-size: 15px;
+  line-height: 23px;
   padding: 2px 2px 0;
   outline: none;
   box-shadow: none;
@@ -165,8 +165,8 @@ window.__ModuleLoader__.load({
 .pair-composer:focus-within { box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary); }
 .pair-composer-bar { display: flex; align-items: center; gap: 8px; }
 .pair-icon-btn {
-  width: 32px;
-  height: 32px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   border: none;
   background: var(--dsw-alias-bg-layer-3);
@@ -178,8 +178,8 @@ window.__ModuleLoader__.load({
 }
 .pair-icon-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .pair-send-btn {
-  width: 38px;
-  height: 38px;
+  width: 44px;
+  height: 44px;
   border-radius: 999px;
   border: none;
   background: var(--dsw-alias-state-business-primary);
@@ -192,7 +192,7 @@ window.__ModuleLoader__.load({
 .pair-send-btn:disabled { opacity: .4; cursor: default; }
 
 .pair-label { display: block; font-size: 12px; line-height: 18px; margin: 12px 0 6px; color: var(--dsw-alias-label-secondary); }
-.pair-hint { font-size: 11.5px; line-height: 1.65; color: var(--dsw-alias-label-secondary); }
+.pair-hint { font-size: 12.5px; line-height: 1.6; color: var(--dsw-alias-label-secondary); }
 .pair-error { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-state-error-primary); }
 .pair-ok { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-state-success-primary); }
 
@@ -529,10 +529,10 @@ body.pair-modal-open .pair-modal { user-select: text; }
 }
 .pair-ws-more:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .pair-menu-danger { color: var(--dsw-alias-state-error-primary) !important; }
-.pair-md-wrap { font-size: 13px; line-height: 1.72; color: var(--dsw-alias-label-primary); }
+.pair-md-wrap { font-size: 15px; line-height: 1.6; color: var(--dsw-alias-label-primary); }
 .pair-md { display: flex; flex-direction: column; gap: 7px; }
 .pair-md-p { margin: 0; white-space: pre-wrap; word-break: break-word; }
-.pair-md-h { margin: 6px 0 0; font-size: 15px; line-height: 1.4; font-weight: 600; }
+.pair-md-h { margin: 8px 0 0; font-size: 17px; line-height: 1.35; font-weight: 600; }
 .pair-md-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
 .pair-md-code {
   padding: 1px 5px;
@@ -711,12 +711,12 @@ body.pair-modal-open .pair-modal { user-select: text; }
 .pair-tool:hover { background: var(--dsw-alias-interactive-bg-hover); }
 .pair-tool-caret { font-size: 9px; color: var(--dsw-alias-label-tertiary); }
 
-@media (min-width: 760px) {
+@media (min-width: 600px) {
   .pair-panes { display: flex; gap: 14px; flex: 1; min-height: 0; }
   .pair-tree-pane { width: 272px; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
   .pair-detail-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
 }
-@media (max-width: 759px) {
+@media (max-width: 599px) {
   .pair-panes { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .pair-tree-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; gap: 8px; }
   .pair-detail-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -731,7 +731,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.41'
+    const CLIENT_BUILD = '0.4.42'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -831,7 +831,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
       const [narrow, setNarrow] = React.useState(false)
       React.useEffect(() => {
         if (typeof window === 'undefined' || !window.matchMedia) return undefined
-        const mq = window.matchMedia('(max-width: 759px)')
+        const mq = window.matchMedia('(max-width: 599px)')
         const update = () => setNarrow(Boolean(mq.matches))
         update()
         if (mq.addEventListener) mq.addEventListener('change', update)
