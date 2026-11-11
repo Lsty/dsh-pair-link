@@ -731,7 +731,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.40'
+    const CLIENT_BUILD = '0.4.41'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1471,6 +1471,24 @@ body.pair-modal-open .pair-modal { user-select: text; }
       const openNative = async () => {
         const target = current && current.path ? current.path : preview.path
         if (!target) return
+        const remote = String(base || '').includes('/remote/')
+        if (remote) {
+          // 手机端：文件在电脑上，能做的就是把它下载到手机上再用手机的方式打开
+          try {
+            const data = await callJson(base, `/file?path=${encodeURIComponent(target)}`)
+            const blob = new Blob([String(data.content ?? '')], { type: 'text/plain;charset=utf-8' })
+            const url = URL.createObjectURL(blob)
+            const link = document.createElement('a')
+            link.href = url
+            link.download = basename(target) || 'file.txt'
+            document.body.appendChild(link)
+            link.click()
+            link.remove()
+            setTimeout(() => URL.revokeObjectURL(url), 2000)
+          } catch { /* ignore */ }
+          return
+        }
+        // 电脑端：直接交给系统默认程序
         try {
           await callJson(base || '', '/open', { method: 'POST', body: JSON.stringify({ path: target }) })
         } catch { /* ignore */ }
@@ -1480,7 +1498,8 @@ body.pair-modal-open .pair-modal { user-select: text; }
         h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation() },
           h('div', { className: 'pair-modal-head' },
             h('span', { className: 'pair-modal-title' }, current && current.path ? current.path : preview.path),
-            h('button', { type: 'button', className: 'pair-modal-action', onClick: openNative }, '用本机打开'),
+            h('button', { type: 'button', className: 'pair-modal-action', onClick: openNative },
+              String(base || '').includes('/remote/') ? '下载到手机' : '用本机打开'),
             h('button', { type: 'button', className: 'pair-more', onClick: onClose }, '×')),
           h('div', { className: 'pair-modal-body' },
             current && current.error
