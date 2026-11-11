@@ -2031,6 +2031,7 @@ window.__ModuleLoader__.load({
     // -----------------------------------------------------------------------
     function TunnelCard({ info }) {
       const [copied, setCopied] = React.useState(false)
+      const [copiedKey, setCopiedKey] = React.useState(false)
       const [publishing, setPublishing] = React.useState(false)
       const [publishMsg, setPublishMsg] = React.useState(null)
       const url = info && info.publicUrl ? info.publicUrl : ''
@@ -2052,6 +2053,18 @@ window.__ModuleLoader__.load({
           setTimeout(() => setCopied(false), 2000)
         } catch {
           if (typeof window !== 'undefined' && window.prompt) window.prompt('复制这个地址：', url)
+        }
+      }
+
+      const copyKey = async () => {
+        const key = info && info.pairKey ? String(info.pairKey) : ''
+        if (!key) return
+        try {
+          await navigator.clipboard.writeText(key)
+          setCopiedKey(true)
+          setTimeout(() => setCopiedKey(false), 2000)
+        } catch {
+          if (typeof window !== 'undefined' && window.prompt) window.prompt('复制配对密钥：', key)
         }
       }
 
@@ -2091,6 +2104,22 @@ window.__ModuleLoader__.load({
               },
             }, url),
             h(Button, { kind: 'outline', size: 'sm', onClick: copy }, copied ? '已复制' : '复制'))
+          : null,
+        info && info.pairKey
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('div', { style: { fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)' } }, '配对密钥'),
+            h('div', { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+              h('code', {
+                style: {
+                  flex: 1, minWidth: 0, padding: '6px 8px',
+                  borderRadius: 'var(--dsw-radius-sm)',
+                  background: 'var(--dsw-alias-bg-base)',
+                  boxShadow: 'inset 0 0 0 .5px var(--dsw-alias-border-l1)',
+                  fontSize: 11, lineHeight: '16px',
+                  wordBreak: 'break-all',
+                },
+              }, String(info.pairKey)),
+              h(Button, { kind: 'outline', size: 'sm', onClick: copyKey }, copiedKey ? '已复制' : '复制')))
           : null,
         !url && state !== 'starting'
           ? h('div', { className: 'pair-hint' },
@@ -2481,7 +2510,7 @@ window.__ModuleLoader__.load({
           ? h('div', { className: 'pair-scroll' },
             h('div', { style: { display: 'flex', justifyContent: 'flex-end', flex: '0 0 auto' } },
               h(Button, { kind: 'ghost', size: 'sm', onClick: () => setShowConfig(false) }, '收起')),
-            h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } }),
+            isHost ? null : h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } }),
             isHost ? h(TunnelCard, { info }) : null)
           : h(React.Fragment, null,
             treeError

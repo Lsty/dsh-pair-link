@@ -1376,6 +1376,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
       linked: Boolean(runtime.remote),
       host: runtime.remote?.httpOrigin ?? '',
       hasSecret: Boolean(runtime.secret),
+      pairKey: runtime.secret,
       hasBridgeToken: Boolean(runtime.remote?.bridgeToken),
       hasBridgePassword: Boolean(runtime.bridgePassword),
       apiBase: runtime.remote ? `${REMOTE_PREFIX}/api` : API_PREFIX,
