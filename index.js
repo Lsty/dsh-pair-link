@@ -21,7 +21,7 @@ import {
   timingSafeEqual,
   verify,
 } from 'node:crypto'
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1015,6 +1015,22 @@ function applySessionApi(ctx, runtime) {
     return { ok: true }
   }
 
+  /** 用系统默认程序打开一个文件（只在 host 上执行）。 */
+  function openWithSystem(filePath) {
+    const resolved = String(filePath ?? '').trim()
+    if (!resolved) throw new Error('缺少路径')
+    let exists = false
+    try { exists = existsSync(resolved) } catch { exists = false }
+    if (!exists) throw new Error('文件不存在')
+    const child = spawn('cmd', ['/c', 'start', '', resolved], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    child.unref?.()
+    return { opened: true, path: resolved }
+  }
+
   /** 读一个文本文件给页面预览（限制大小）。 */
   function readTextFile(filePath) {
     const resolved = String(filePath ?? '').trim()
@@ -1069,6 +1085,7 @@ function applySessionApi(ctx, runtime) {
     moveWorkspace,
     moveSession,
     readTextFile,
+    openWithSystem,
     readWorkspaceMarks,
     buildTree,
     sessionMeta,
@@ -1171,6 +1188,15 @@ function applyHostRoutes(ctx, runtime, sessions) {
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'file') {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const result = sessions.readTextFile(url.searchParams.get('path') ?? '')
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'open') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = sessions.openWithSystem(String(body?.path ?? ''))
         sendJson(res, 200, { ok: true, ...result })
         return
       }

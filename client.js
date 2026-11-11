@@ -404,6 +404,19 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
 }
 .pair-modal-body { padding: 14px 16px; overflow-y: auto; }
+.pair-modal-action {
+  flex: 0 0 auto;
+  border: none;
+  border-radius: var(--dsw-radius-sm);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 22px;
+  padding: 0 8px;
+  cursor: pointer;
+}
+.pair-modal-action:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 body.pair-modal-open .pair-page { user-select: none; }
 body.pair-modal-open .pair-modal { user-select: text; }
 .pair-file-edit {
@@ -718,7 +731,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.39'
+    const CLIENT_BUILD = '0.4.40'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1426,7 +1439,9 @@ body.pair-modal-open .pair-modal { user-select: text; }
           : null)
     }
 
-    function FilePreviewModal({ preview, onClose }) {
+    function FilePreviewModal({ preview, onClose, base }) {
+      const [current, setCurrent] = React.useState(preview)
+      React.useEffect(() => { setCurrent(preview) }, [preview])
       React.useEffect(() => {
         if (!preview) return undefined
         // 弹层打开期间让页面其它部分不可选，Ctrl+A 只会选中弹层内容
@@ -1434,15 +1449,43 @@ body.pair-modal-open .pair-modal { user-select: text; }
         return () => document.body.classList.remove('pair-modal-open')
       }, [preview])
       if (!preview) return null
+
+      const dirOf = (value) => {
+        const parts = String(value || '').split(/[\\/]/)
+        parts.pop()
+        return parts.join('\\')
+      }
+
+      const openLinked = async (raw) => {
+        const target = /^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/')
+          ? raw
+          : `${dirOf(current && current.path ? current.path : '')}\\${String(raw).replace(/^[.\\/]+/, '')}`
+        try {
+          const data = await callJson(base || '', `/file?path=${encodeURIComponent(target)}`)
+          setCurrent({ path: data.path || target, content: String(data.content ?? '') })
+        } catch (err) {
+          setCurrent({ path: target, error: String(err && err.message ? err.message : err) })
+        }
+      }
+
+      const openNative = async () => {
+        const target = current && current.path ? current.path : preview.path
+        if (!target) return
+        try {
+          await callJson(base || '', '/open', { method: 'POST', body: JSON.stringify({ path: target }) })
+        } catch { /* ignore */ }
+      }
+
       return h('div', { className: 'pair-modal-backdrop', onClick: onClose },
         h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation() },
           h('div', { className: 'pair-modal-head' },
-            h('span', { className: 'pair-modal-title' }, preview.path),
+            h('span', { className: 'pair-modal-title' }, current && current.path ? current.path : preview.path),
+            h('button', { type: 'button', className: 'pair-modal-action', onClick: openNative }, '用本机打开'),
             h('button', { type: 'button', className: 'pair-more', onClick: onClose }, '×')),
           h('div', { className: 'pair-modal-body' },
-            preview.error
-              ? h('div', { className: 'pair-error' }, preview.error)
-              : h(MarkdownText, { text: preview.content }))))
+            current && current.error
+              ? h('div', { className: 'pair-error' }, current.error)
+              : h(MarkdownText, { text: (current || preview).content, onOpenFile: openLinked }))))
     }
 
     function FileEditCard({ message, base }) {
@@ -1487,7 +1530,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
             }, open ? '⌄' : '›')
             : null),
         open && content ? h('pre', { className: 'pair-file-code' }, content) : null,
-        h(FilePreviewModal, { preview, onClose: () => setPreview(null) }))
+        h(FilePreviewModal, { preview, onClose: () => setPreview(null), base }))
     }
 
     function inlineNodes(text, onOpenFile) {
@@ -1659,7 +1702,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
           textAlign: mine ? 'right' : 'left', padding: '0 2px',
         },
       }, formatClock(message.time)),
-      h(FilePreviewModal, { preview: filePreview, onClose: () => setFilePreview(null) }))
+      h(FilePreviewModal, { preview: filePreview, onClose: () => setFilePreview(null), base }))
     }
 
     function SessionDetail({ base, session, onBack, onChanged, narrow }) {
