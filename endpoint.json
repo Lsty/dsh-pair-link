@@ -1,7 +1,7 @@
 {
   "device": "Ma",
   "url": "https://interference-ear-next-lead.trycloudflare.com",
-  "ts": 1794358317891,
+  "ts": 1794358554954,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "clD8VI2e0iVFsD1SS9bZ1RX3kwjpVgTg+L5KGFRPsPgDtpLpLyAPQve3PKBG9+vTNH320YWssHqVzLuQq8V2Ag=="
+  "sig": "NpMUtpDgl81V/tJUYf7TcfuRRig2paTztMFSR+jQl52DajXHmrZH855JFunK7cUB+UI99P+3iDV+zqy2TvFxAA=="
 }
