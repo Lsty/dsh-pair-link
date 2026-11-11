@@ -565,7 +565,8 @@ body.pair-modal-open .pair-modal { user-select: text; }
   font-size: 12px;
   line-height: 1.6;
 }
-.pair-reasoning-box { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.pair-reasoning-box { display: flex; flex-direction: column; gap: 2px; align-items: stretch; }
+.pair-reasoning-item { display: flex; flex-direction: column; gap: 2px; }
 .pair-scroll {
   flex: 1;
   min-height: 0;
@@ -778,7 +779,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.49'
+    const CLIENT_BUILD = '0.4.50'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1364,11 +1365,24 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 对话详情
     // -----------------------------------------------------------------------
     function Reasoning({ text }) {
+      const segments = String(text || '')
+        .split(/\n{2,}/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+      if (segments.length === 0) return null
+      return h('div', { className: 'pair-reasoning-box' },
+        segments.map((segment, index) => h(ReasoningSegment, {
+          key: index,
+          text: segment,
+        })))
+    }
+
+    /** 一段思考：折叠成一行摘要，点开看全文。 */
+    function ReasoningSegment({ text }) {
       const [open, setOpen] = React.useState(false)
-      if (!text) return null
       const flat = String(text).replace(/\s+/g, ' ').trim()
       const summary = flat.length > 64 ? `${flat.slice(0, 64)}…` : flat
-      return h('div', { className: 'pair-reasoning-box' },
+      return h('div', { className: 'pair-reasoning-item' },
         h('button', {
           type: 'button',
           className: 'pair-reasoning-toggle',
