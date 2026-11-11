@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.21'
+const VERSION = '0.4.22'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 15 * 60_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -1064,9 +1064,20 @@ function basenameOf(path) {
 function applyHostRoutes(ctx, runtime, sessions) {
   const route = (kind, path, handler) => ctx.effect(() => ctx.webServer.register({ kind, path, handler }))
 
-  const authorize = (req) => {
+  // 页面令牌：优先校验注入的 token；同源页面也放行，
+  // 这样浏览器缓存了旧 HTML 时不会整页 403。
+  const pageOk = (req) => {
     const header = String(req.headers[PAGE_TOKEN_HEADER] ?? '')
-    if (safeEqual(header, runtime.pageToken)) return 'page'
+    if (safeEqual(header, runtime.pageToken)) return true
+    const host = String(req.headers.host ?? '')
+    const source = String(req.headers.referer ?? req.headers.origin ?? '')
+    if (host && source && source.includes(`//${host}`)) return true
+    return false
+  }
+
+  const authorize = (req) => {
+    if (pageOk(req)) return 'page'
+    const header = String(req.headers[PAGE_TOKEN_HEADER] ?? '')
     if (runtime.secret) {
       if (safeEqual(header, runtime.secret)) return 'pair'
       const candidate = requestUrl(req).searchParams.get('pair') ?? ''
@@ -1323,8 +1334,9 @@ function applyHostRoutes(ctx, runtime, sessions) {
 
   // --- 页面信息 ---
   const pageAuthorized = (req) => {
+    if (pageOk(req)) return true
     const header = String(req.headers[PAGE_TOKEN_HEADER] ?? '')
-    return safeEqual(header, runtime.pageToken) || (runtime.secret ? safeEqual(header, runtime.secret) : false)
+    return runtime.secret ? safeEqual(header, runtime.secret) : false
   }
 
   route('exact', '/dsh-pair/page-info', (req, res) => {
@@ -1382,7 +1394,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
   // --- 自更新：检查 / 执行（只认本机页面令牌，远程密钥不能改手机代码） ---
   route('exact', '/dsh-pair/self-update/check', async (req, res) => {
     cors(res)
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     const local = localPackageVersion()
@@ -1412,7 +1424,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
   route('exact', '/dsh-pair/self-update/apply', async (req, res) => {
     cors(res)
     if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     try {
@@ -1444,7 +1456,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
   route('exact', '/dsh-pair/sync-endpoint', async (req, res) => {
     cors(res)
     if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     try {
@@ -1458,7 +1470,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
   route('exact', '/dsh-pair/publish', async (req, res) => {
     cors(res)
     if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     try {
@@ -1497,7 +1509,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
     cors(res)
     if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return }
     if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     const raw = await readBody(req)
@@ -1589,7 +1601,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
   // --- 手机端审批（页面浮层） ---
   route('exact', '/dsh-pair/inbox', (req, res) => {
     cors(res)
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     sendJson(res, 200, {
@@ -1624,7 +1636,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
   route('exact', '/dsh-pair/answer-question', async (req, res) => {
     cors(res)
     if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     const raw = await readBody(req)
@@ -1652,7 +1664,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
   route('exact', '/dsh-pair/decide', async (req, res) => {
     cors(res)
     if (req.method !== 'POST') return sendJson(res, 405, { ok: false, error: 'POST only' })
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     const raw = await readBody(req)
@@ -2338,7 +2350,7 @@ function applyProxy(ctx, runtime) {
   route('prefix', REMOTE_PREFIX, async (req, res) => {
     cors(res)
     if (req.method === 'OPTIONS') { res.statusCode = 204; res.end(); return }
-    if (!safeEqual(String(req.headers[PAGE_TOKEN_HEADER] ?? ''), runtime.pageToken)) {
+    if (!pageOk(req)) {
       return sendJson(res, 403, { ok: false, error: 'bad page token' })
     }
     if (!runtime.remote) return sendJson(res, 400, { ok: false, error: '还没有配置电脑地址' })
