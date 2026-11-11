@@ -2169,7 +2169,7 @@ window.__ModuleLoader__.load({
         setMessage(null)
         try {
           const body = await callJson('', '/dsh-pair/self-update/apply', { method: 'POST' })
-          setMessage(`已更新到 ${body.version || '电脑版本'}，重启 DSH 后生效`)
+          setMessage(`已更新到 ${body.version || '电脑版本'} → ${body.root || '?'}，重启 DSH 后生效`)
           await check()
         } catch (err) {
           setMessage('更新失败：' + String(err && err.message ? err.message : err))

@@ -2069,6 +2069,7 @@ async function applySelfUpdate(runtime) {
     version: String(manifest?.version ?? ''),
     files: downloaded.map((item) => item.path),
     backup: backupDir,
+    root: PACKAGE_ROOT,
   }
 }
 
