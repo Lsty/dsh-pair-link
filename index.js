@@ -1004,6 +1004,20 @@ function applySessionApi(ctx, runtime) {
     return { ok: true }
   }
 
+  /** 读一个文本文件给页面预览（限制大小）。 */
+  function readTextFile(filePath) {
+    const resolved = String(filePath ?? '').trim()
+    if (!resolved) throw new Error('缺少路径')
+    let content = ''
+    try {
+      content = readFileSync(resolved, 'utf8')
+    } catch (err) {
+      throw new Error(`读文件失败：${err?.message ?? err}`)
+    }
+    if (content.length > 400_000) throw new Error('文件太大（超过 400KB），请到电脑上查看')
+    return { content, path: resolved }
+  }
+
   /** 读一次工作区 baseline，拿到归档/固定集合。 */
   async function readWorkspaceMarks() {
     const workspaces = ctx.get?.('workspaceController')
@@ -1043,6 +1057,7 @@ function applySessionApi(ctx, runtime) {
     deleteWorkspace,
     moveWorkspace,
     moveSession,
+    readTextFile,
     readWorkspaceMarks,
     buildTree,
     sessionMeta,
@@ -1136,6 +1151,13 @@ function applyHostRoutes(ctx, runtime, sessions) {
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'search') {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const result = await sessions.searchSessions(url.searchParams.get('q') ?? '')
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'file') {
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const result = sessions.readTextFile(url.searchParams.get('path') ?? '')
         sendJson(res, 200, { ok: true, ...result })
         return
       }

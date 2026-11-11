@@ -351,6 +351,59 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
 }
 
+.pair-file-link {
+  border: none;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+  font-family: inherit;
+  color: var(--dsw-alias-label-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--dsw-alias-border-l2);
+  text-underline-offset: 2px;
+}
+.pair-file-link:hover { color: var(--dsw-alias-state-business-primary); }
+.pair-file-link:disabled { cursor: default; text-decoration: none; }
+.pair-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  background: rgba(0, 0, 0, .35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.pair-modal {
+  width: min(760px, 92vw);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--dsw-alias-bg-layer-1);
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+}
+.pair-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-bottom: .5px solid var(--dsw-alias-border-l1);
+  flex: 0 0 auto;
+}
+.pair-modal-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-secondary);
+}
+.pair-modal-body { padding: 14px 16px; overflow-y: auto; }
 .pair-file-edit {
   display: flex;
   flex-direction: column;
@@ -1370,22 +1423,64 @@ window.__ModuleLoader__.load({
 
     function FileEditCard({ message }) {
       const [open, setOpen] = React.useState(false)
+      const [preview, setPreview] = React.useState(null)
+      const [busy, setBusy] = React.useState(false)
       const body = String(message.body || '')
       const oldText = String(message.oldText || '')
       const content = body || oldText
       const isWrite = message.tool === 'write'
+      const isText = /\.(md|markdown|txt|json|jsonc|js|cjs|mjs|ts|tsx|jsx|py|yml|yaml|css|html|sh|ps1)$/i.test(message.text)
+
+      const openFile = async () => {
+        if (!isText || busy) return
+        setBusy(true)
+        try {
+          const data = await callJson('', `/dsh-pair/api/file?path=${encodeURIComponent(message.text)}`)
+          setPreview({ path: data.path || message.text, content: String(data.content ?? '') })
+        } catch (err) {
+          setPreview({ path: message.text, error: String(err && err.message ? err.message : err) })
+        } finally {
+          setBusy(false)
+        }
+      }
+
       return h('div', { className: 'pair-file-edit' },
-        h('button', {
-          type: 'button',
-          className: 'pair-file-head',
-          onClick: () => { if (content) setOpen((value) => !value) },
-          style: { background: 'transparent', border: 'none', padding: 0, cursor: content ? 'pointer' : 'default' },
-        },
-        h('span', { className: 'pair-file-tool' }, isWrite ? '写入' : '编辑'),
-        h('code', { className: 'pair-file-path' }, message.text),
-        h('span', { className: 'pair-file-stat' }, `+${message.added ?? 0} -${message.removed ?? 0}`),
-        content ? h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›') : null),
-        open && content ? h('pre', { className: 'pair-file-code' }, content) : null)
+        h('div', { className: 'pair-file-head' },
+          h('span', { className: 'pair-file-tool' }, isWrite ? '写入' : '编辑'),
+          h('button', {
+            type: 'button',
+            className: isText ? 'pair-file-path pair-file-link' : 'pair-file-path',
+            onClick: openFile,
+            disabled: !isText || busy,
+            title: isText ? '打开文件' : '不支持预览',
+          }, message.text),
+          h('span', { className: 'pair-file-stat' }, `+${message.added ?? 0} -${message.removed ?? 0}`),
+          content
+            ? h('button', {
+              type: 'button',
+              className: 'pair-more',
+              onClick: () => setOpen((value) => !value),
+            }, open ? '⌄' : '›')
+            : null),
+        open && content ? h('pre', { className: 'pair-file-code' }, content) : null,
+        preview
+          ? h('div', {
+            className: 'pair-modal-backdrop',
+            onClick: () => setPreview(null),
+          },
+          h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation() },
+            h('div', { className: 'pair-modal-head' },
+              h('span', { className: 'pair-modal-title' }, preview.path),
+              h('button', {
+                type: 'button',
+                className: 'pair-more',
+                onClick: () => setPreview(null),
+              }, '×')),
+            h('div', { className: 'pair-modal-body' },
+              preview.error
+                ? h('div', { className: 'pair-error' }, preview.error)
+                : h(MarkdownText, { text: preview.content }))))
+          : null)
     }
 
     function inlineNodes(text) {
