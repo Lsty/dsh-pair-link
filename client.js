@@ -1565,17 +1565,27 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'pair-md' }, blocks)
     }
 
-    function MessageBubble({ message, onAnswer, answering }) {
+    function MessageBubble({ message, onAnswer, answering, cwd }) {
       const [filePreview, setFilePreview] = React.useState(null)
       const role = message.role
 
+      const resolvePath = (value) => {
+        const raw = String(value || '').trim()
+        if (!raw) return raw
+        if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || raw.startsWith('\\\\')) return raw
+        const base = String(cwd || '').replace(/[\\/]+$/, '')
+        if (!base) return raw
+        return `${base}\\${raw.replace(/^[.\\/]+/, '')}`
+      }
+
       const openFile = async (filePath) => {
         if (!filePath) return
+        const full = resolvePath(filePath)
         try {
-          const data = await callJson('', `/dsh-pair/api/file?path=${encodeURIComponent(filePath)}`)
-          setFilePreview({ path: data.path || filePath, content: String(data.content ?? '') })
+          const data = await callJson('', `/dsh-pair/api/file?path=${encodeURIComponent(full)}`)
+          setFilePreview({ path: data.path || full, content: String(data.content ?? '') })
         } catch (err) {
-          setFilePreview({ path: filePath, error: String(err && err.message ? err.message : err) })
+          setFilePreview({ path: full, error: String(err && err.message ? err.message : err) })
         }
       }
 
@@ -1931,6 +1941,7 @@ window.__ModuleLoader__.load({
                 message,
                 onAnswer: answerQuestion,
                 answering: answering === message.callId,
+                cwd: session.cwd,
               })),
             ]
           })()),
