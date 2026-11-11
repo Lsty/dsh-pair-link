@@ -643,7 +643,21 @@ body.pair-modal-open .pair-modal { user-select: text; }
   border-radius: 8px;
   background: var(--dsw-alias-bg-layer-2);
 }
-.pair-diff-line { white-space: pre-wrap; word-break: break-word; }
+.pair-diff-line { white-space: pre-wrap; word-break: break-word; display: flex; gap: 6px; }
+.pair-diff-no {
+  flex: 0 0 auto;
+  width: 28px;
+  text-align: right;
+  color: var(--dsw-alias-label-dimmed);
+  user-select: none;
+}
+.pair-diff-mark { flex: 0 0 auto; width: 8px; }
+.pair-diff-text { flex: 1; min-width: 0; }
+.pair-diff-skip {
+  color: var(--dsw-alias-label-dimmed);
+  font-style: italic;
+  padding: 2px 0;
+}
 .pair-diff-add { color: var(--dsw-alias-state-success-primary); }
 .pair-diff-del { color: var(--dsw-alias-state-error-primary); }
 .pair-diff-same { color: var(--dsw-alias-label-tertiary); }
@@ -764,7 +778,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.48'
+    const CLIENT_BUILD = '0.4.49'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1540,6 +1554,42 @@ body.pair-modal-open .pair-modal { user-select: text; }
               : h(MarkdownText, { text: (current || preview).content, onOpenFile: openLinked }))))
     }
 
+    /** diff 渲染：行号 + 长段未改动折叠。 */
+    function DiffView({ lines }) {
+      if (!Array.isArray(lines) || lines.length === 0) return null
+      const items = []
+      let sameRun = []
+      const flushSame = () => {
+        if (sameRun.length > 8) {
+          items.push(...sameRun.slice(0, 3))
+          items.push({ type: 'skip', count: sameRun.length - 6 })
+          items.push(...sameRun.slice(-3))
+        } else {
+          items.push(...sameRun)
+        }
+        sameRun = []
+      }
+      for (const line of lines) {
+        if (line.type === 'same') sameRun.push(line)
+        else {
+          flushSame()
+          items.push(line)
+        }
+      }
+      flushSame()
+
+      return h('div', { className: 'pair-diff' }, items.map((line, index) => {
+        if (line.type === 'skip') {
+          return h('div', { key: `skip${index}`, className: 'pair-diff-skip' }, `… ${line.count} 行未改动`)
+        }
+        return h('div', { key: index, className: `pair-diff-line pair-diff-${line.type}` },
+          h('span', { className: 'pair-diff-no' }, line.oldLine === undefined ? '' : String(line.oldLine)),
+          h('span', { className: 'pair-diff-no' }, line.newLine === undefined ? '' : String(line.newLine)),
+          h('span', { className: 'pair-diff-mark' }, line.type === 'add' ? '+' : (line.type === 'del' ? '-' : ' ')),
+          h('span', { className: 'pair-diff-text' }, line.text))
+      }))
+    }
+
     function FileEditCard({ message, base }) {
       const [open, setOpen] = React.useState(false)
       const [preview, setPreview] = React.useState(null)
@@ -1583,11 +1633,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
             : null),
         open && content
           ? (Array.isArray(message.diff) && message.diff.length > 0
-            ? h('div', { className: 'pair-diff' },
-              message.diff.map((line, index) => h('div', {
-                key: index,
-                className: `pair-diff-line pair-diff-${line.type}`,
-              }, `${line.type === 'add' ? '+' : (line.type === 'del' ? '-' : ' ')} ${line.text}`)))
+            ? h(DiffView, { lines: message.diff })
             : h('pre', { className: 'pair-file-code' }, content))
           : null,
         h(FilePreviewModal, { preview, onClose: () => setPreview(null), base }))

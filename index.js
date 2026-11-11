@@ -375,6 +375,24 @@ function diffLines(oldText, newText) {
   }
   while (i < n) { out.push({ type: 'del', text: a[i] }); i += 1 }
   while (j < m) { out.push({ type: 'add', text: b[j] }); j += 1 }
+
+  // 补行号：del 记旧行号，add 记新行号，same 两边都有
+  let oldNo = 0
+  let newNo = 0
+  for (const line of out) {
+    if (line.type === 'same') {
+      oldNo += 1
+      newNo += 1
+      line.oldLine = oldNo
+      line.newLine = newNo
+    } else if (line.type === 'del') {
+      oldNo += 1
+      line.oldLine = oldNo
+    } else {
+      newNo += 1
+      line.newLine = newNo
+    }
+  }
   return out
 }
 
