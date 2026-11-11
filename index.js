@@ -31,7 +31,6 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.33'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 15 * 60_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -43,6 +42,18 @@ const PAGE_TOKEN_HEADER = 'x-pair-token'
 
 // 自更新只搬这些文件，且只从本包目录搬
 const PACKAGE_ROOT = dirname(fileURLToPath(import.meta.url))
+
+// 版本号只认 package.json，避免入口文件和包描述各写一份、改漏一个
+function readPackageVersion() {
+  try {
+    const pkg = JSON.parse(readFileSync(join(PACKAGE_ROOT, 'package.json'), 'utf8'))
+    return String(pkg.version ?? '')
+  } catch {
+    return ''
+  }
+}
+
+const VERSION = readPackageVersion() || '0.0.0'
 const PACKAGE_FILES = [
   'index.js',
   'client.js',
