@@ -1085,15 +1085,10 @@ function basenameOf(path) {
 }
 
 // ---------------------------------------------------------------------------
-// host 路由：API / 页面信息 / 配置 / 审批
-// ---------------------------------------------------------------------------
-function applyHostRoutes(ctx, runtime, sessions) {
-  const route = (kind, path, handler) => ctx.effect(() => ctx.webServer.register({ kind, path, handler }))
-
-  // 页面令牌：优先校验注入的 token；本机请求也放行，
-  // 这样浏览器缓存了旧 HTML、或 Electron 壳不带 referer 时不会整页 403。
-  // 远程（经隧道）请求仍必须带配对密钥，不会被这条放行影响。
-  const pageOk = (req) => {
+// 页面令牌判定：模块级工厂，applyHostRoutes 和 applyProxy 各自持有一份，
+// 避免引用了别的函数作用域里的局部变量（那会变成运行时 400 空 body）。
+function makePageOk(runtime) {
+  return (req) => {
     const header = String(req.headers[PAGE_TOKEN_HEADER] ?? '')
     if (safeEqual(header, runtime.pageToken)) return true
     const remote = String(req.socket?.remoteAddress ?? '')
@@ -1104,6 +1099,13 @@ function applyHostRoutes(ctx, runtime, sessions) {
     if (!source) return true
     return Boolean(host) && source.includes(`//${host}`)
   }
+}
+
+// host 路由：API / 页面信息 / 配置 / 审批
+// ---------------------------------------------------------------------------
+function applyHostRoutes(ctx, runtime, sessions) {
+  const route = (kind, path, handler) => ctx.effect(() => ctx.webServer.register({ kind, path, handler }))
+  const pageOk = makePageOk(runtime)
 
   const authorize = (req) => {
     if (pageOk(req)) return 'page'
@@ -2385,6 +2387,7 @@ async function ensureBridgeCookie(runtime) {  if (!runtime.bridgePassword || !ru
 
 function applyProxy(ctx, runtime) {
   const route = (kind, path, handler) => ctx.effect(() => ctx.webServer.register({ kind, path, handler }))
+  const pageOk = makePageOk(runtime)
 
   route('prefix', REMOTE_PREFIX, async (req, res) => {
     cors(res)
