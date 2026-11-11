@@ -1421,6 +1421,19 @@ window.__ModuleLoader__.load({
           : null)
     }
 
+    function FilePreviewModal({ preview, onClose }) {
+      if (!preview) return null
+      return h('div', { className: 'pair-modal-backdrop', onClick: onClose },
+        h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation() },
+          h('div', { className: 'pair-modal-head' },
+            h('span', { className: 'pair-modal-title' }, preview.path),
+            h('button', { type: 'button', className: 'pair-more', onClick: onClose }, '×')),
+          h('div', { className: 'pair-modal-body' },
+            preview.error
+              ? h('div', { className: 'pair-error' }, preview.error)
+              : h(MarkdownText, { text: preview.content }))))
+    }
+
     function FileEditCard({ message }) {
       const [open, setOpen] = React.useState(false)
       const [preview, setPreview] = React.useState(null)
@@ -1463,36 +1476,40 @@ window.__ModuleLoader__.load({
             }, open ? '⌄' : '›')
             : null),
         open && content ? h('pre', { className: 'pair-file-code' }, content) : null,
-        preview
-          ? h('div', {
-            className: 'pair-modal-backdrop',
-            onClick: () => setPreview(null),
-          },
-          h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation() },
-            h('div', { className: 'pair-modal-head' },
-              h('span', { className: 'pair-modal-title' }, preview.path),
-              h('button', {
-                type: 'button',
-                className: 'pair-more',
-                onClick: () => setPreview(null),
-              }, '×')),
-            h('div', { className: 'pair-modal-body' },
-              preview.error
-                ? h('div', { className: 'pair-error' }, preview.error)
-                : h(MarkdownText, { text: preview.content }))))
-          : null)
+        h(FilePreviewModal, { preview, onClose: () => setPreview(null) }))
     }
 
-    function inlineNodes(text) {
+    function inlineNodes(text, onOpenFile) {
       const nodes = []
-      const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g
+      const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\)|([A-Za-z]:\\[^\s"'`<>|]+?\.(?:md|markdown|txt|json|js|ts|jsx|tsx|py|yml|yaml|css|html)))/g
       let last = 0
       let match = re.exec(text)
       while (match) {
         if (match.index > last) nodes.push(text.slice(last, match.index))
         if (match[2] !== undefined) nodes.push(h('strong', { key: `b${match.index}` }, match[2]))
         else if (match[3] !== undefined) nodes.push(h('code', { key: `c${match.index}`, className: 'pair-md-code' }, match[3]))
-        else if (match[4] !== undefined) nodes.push(h('a', { key: `a${match.index}`, href: match[5], target: '_blank', rel: 'noreferrer' }, match[4]))
+        else if (match[4] !== undefined) {
+          const href = match[5]
+          if (/^https?:/i.test(href) || href.startsWith('#')) {
+            nodes.push(h('a', { key: `a${match.index}`, href, target: '_blank', rel: 'noreferrer' }, match[4]))
+          } else if (onOpenFile) {
+            nodes.push(h('button', {
+              key: `f${match.index}`,
+              type: 'button',
+              className: 'pair-file-link',
+              onClick: () => onOpenFile(href),
+            }, match[4]))
+          } else {
+            nodes.push(match[4])
+          }
+        } else if (match[6] !== undefined && onOpenFile) {
+          nodes.push(h('button', {
+            key: `p${match.index}`,
+            type: 'button',
+            className: 'pair-file-link',
+            onClick: () => onOpenFile(match[6]),
+          }, match[6]))
+        }
         last = match.index + match[0].length
         match = re.exec(text)
       }
@@ -1501,7 +1518,7 @@ window.__ModuleLoader__.load({
     }
 
     /** 轻量 Markdown：标题、列表、代码块、粗体、行内代码、链接。 */
-    function MarkdownText({ text }) {
+    function MarkdownText({ text, onOpenFile }) {
       const lines = String(text || '').split('\n')
       const blocks = []
       let i = 0
@@ -1518,7 +1535,7 @@ window.__ModuleLoader__.load({
         const heading = /^(#{1,4})\s+(.*)$/.exec(line)
         if (heading) {
           const level = Math.min(heading[1].length + 2, 5)
-          blocks.push(h(`h${level}`, { key: `h${i}`, className: 'pair-md-h' }, inlineNodes(heading[2])))
+          blocks.push(h(`h${level}`, { key: `h${i}`, className: 'pair-md-h' }, inlineNodes(heading[2], onOpenFile)))
           i += 1
           continue
         }
@@ -1526,7 +1543,7 @@ window.__ModuleLoader__.load({
           const items = []
           const ordered = /^\s*\d+\./.test(line)
           while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
-            items.push(h('li', { key: `li${i}` }, inlineNodes(lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, ''))))
+            items.push(h('li', { key: `li${i}` }, inlineNodes(lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, ''), onOpenFile)))
             i += 1
           }
           blocks.push(h(ordered ? 'ol' : 'ul', { key: `list${i}`, className: 'pair-md-list' }, items))
@@ -1543,13 +1560,25 @@ window.__ModuleLoader__.load({
           para.push(lines[i])
           i += 1
         }
-        blocks.push(h('p', { key: `p${i}`, className: 'pair-md-p' }, inlineNodes(para.join('\n'))))
+        blocks.push(h('p', { key: `p${i}`, className: 'pair-md-p' }, inlineNodes(para.join('\n'), onOpenFile)))
       }
       return h('div', { className: 'pair-md' }, blocks)
     }
 
     function MessageBubble({ message, onAnswer, answering }) {
+      const [filePreview, setFilePreview] = React.useState(null)
       const role = message.role
+
+      const openFile = async (filePath) => {
+        if (!filePath) return
+        try {
+          const data = await callJson('', `/dsh-pair/api/file?path=${encodeURIComponent(filePath)}`)
+          setFilePreview({ path: data.path || filePath, content: String(data.content ?? '') })
+        } catch (err) {
+          setFilePreview({ path: filePath, error: String(err && err.message ? err.message : err) })
+        }
+      }
+
       if (role === 'question') {
         return h(QuestionCard, { message, onAnswer, busy: answering, readOnly: true })
       }
@@ -1600,7 +1629,7 @@ window.__ModuleLoader__.load({
               wordBreak: 'break-word',
             },
           }, message.text)
-          : h('div', { className: 'pair-md-wrap' }, h(MarkdownText, { text: message.text })))
+          : h('div', { className: 'pair-md-wrap' }, h(MarkdownText, { text: message.text, onOpenFile: openFile })))
         : null,
       h(ImageGroup, { images: message.images }),
       h('div', {
@@ -1608,7 +1637,8 @@ window.__ModuleLoader__.load({
           fontSize: 10, color: 'var(--dsw-alias-label-tertiary)',
           textAlign: mine ? 'right' : 'left', padding: '0 2px',
         },
-      }, formatClock(message.time)))
+      }, formatClock(message.time)),
+      h(FilePreviewModal, { preview: filePreview, onClose: () => setFilePreview(null) }))
     }
 
     function SessionDetail({ base, session, onBack, onChanged, narrow }) {
