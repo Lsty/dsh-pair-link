@@ -1,7 +1,7 @@
 {
   "device": "Ma",
   "url": "https://methods-hudson-midi-rare.trycloudflare.com",
-  "ts": 1794359400103,
+  "ts": 1794359430371,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "WqMDDTd+CSBHkBE7RbWqZz5UBYYqn45BVa5KLILZKa+8vfK+0np8f3MRr45f/VjkaoONtZPR8NQCK/Y30NEwBQ=="
+  "sig": "aAfDTK92ee5FvVLK+oPwC58zjWGpHrtYRYj79RS6GvA0+cOKnd989W0j40NwcrQz1ihWQTR8MGqumkCsbqR3CQ=="
 }
