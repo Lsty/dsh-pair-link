@@ -458,6 +458,28 @@ window.__ModuleLoader__.load({
 }
 .pair-ws-more:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .pair-menu-danger { color: var(--dsw-alias-state-error-primary) !important; }
+.pair-md-wrap { font-size: 13px; line-height: 1.72; color: var(--dsw-alias-label-primary); }
+.pair-md { display: flex; flex-direction: column; gap: 7px; }
+.pair-md-p { margin: 0; white-space: pre-wrap; word-break: break-word; }
+.pair-md-h { margin: 6px 0 0; font-size: 15px; line-height: 1.4; font-weight: 600; }
+.pair-md-list { margin: 0; padding-left: 20px; display: flex; flex-direction: column; gap: 3px; }
+.pair-md-code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--dsw-alias-bg-layer-2);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+}
+.pair-md-pre {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+}
 .pair-file-stat {
   flex: 0 0 auto;
   font-size: 11px;
@@ -1318,6 +1340,71 @@ window.__ModuleLoader__.load({
           : null)
     }
 
+    function inlineNodes(text) {
+      const nodes = []
+      const re = /(\*\*([^*]+)\*\*|`([^`]+)`|\[([^\]]+)\]\(([^)]+)\))/g
+      let last = 0
+      let match = re.exec(text)
+      while (match) {
+        if (match.index > last) nodes.push(text.slice(last, match.index))
+        if (match[2] !== undefined) nodes.push(h('strong', { key: `b${match.index}` }, match[2]))
+        else if (match[3] !== undefined) nodes.push(h('code', { key: `c${match.index}`, className: 'pair-md-code' }, match[3]))
+        else if (match[4] !== undefined) nodes.push(h('a', { key: `a${match.index}`, href: match[5], target: '_blank', rel: 'noreferrer' }, match[4]))
+        last = match.index + match[0].length
+        match = re.exec(text)
+      }
+      if (last < text.length) nodes.push(text.slice(last))
+      return nodes.length > 0 ? nodes : [text]
+    }
+
+    /** 轻量 Markdown：标题、列表、代码块、粗体、行内代码、链接。 */
+    function MarkdownText({ text }) {
+      const lines = String(text || '').split('\n')
+      const blocks = []
+      let i = 0
+      while (i < lines.length) {
+        const line = lines[i]
+        if (/^```/.test(line)) {
+          const body = []
+          i += 1
+          while (i < lines.length && !/^```/.test(lines[i])) { body.push(lines[i]); i += 1 }
+          i += 1
+          blocks.push(h('pre', { key: `pre${i}`, className: 'pair-md-pre' }, h('code', null, body.join('\n'))))
+          continue
+        }
+        const heading = /^(#{1,4})\s+(.*)$/.exec(line)
+        if (heading) {
+          const level = Math.min(heading[1].length + 2, 5)
+          blocks.push(h(`h${level}`, { key: `h${i}`, className: 'pair-md-h' }, inlineNodes(heading[2])))
+          i += 1
+          continue
+        }
+        if (/^\s*([-*+]|\d+\.)\s+/.test(line)) {
+          const items = []
+          const ordered = /^\s*\d+\./.test(line)
+          while (i < lines.length && /^\s*([-*+]|\d+\.)\s+/.test(lines[i])) {
+            items.push(h('li', { key: `li${i}` }, inlineNodes(lines[i].replace(/^\s*([-*+]|\d+\.)\s+/, ''))))
+            i += 1
+          }
+          blocks.push(h(ordered ? 'ol' : 'ul', { key: `list${i}`, className: 'pair-md-list' }, items))
+          continue
+        }
+        if (!line.trim()) { i += 1; continue }
+        const para = []
+        while (
+          i < lines.length && lines[i].trim()
+          && !/^```/.test(lines[i])
+          && !/^(#{1,4})\s+/.test(lines[i])
+          && !/^\s*([-*+]|\d+\.)\s+/.test(lines[i])
+        ) {
+          para.push(lines[i])
+          i += 1
+        }
+        blocks.push(h('p', { key: `p${i}`, className: 'pair-md-p' }, inlineNodes(para.join('\n'))))
+      }
+      return h('div', { className: 'pair-md' }, blocks)
+    }
+
     function MessageBubble({ message, onAnswer, answering }) {
       const role = message.role
       if (role === 'question') {
@@ -1357,19 +1444,20 @@ window.__ModuleLoader__.load({
       },
       mine ? null : h(Reasoning, { text: message.reasoning }),
       message.text
-        ? h('div', {
-          style: {
-            padding: '8px 12px',
-            borderRadius: 'var(--dsw-radius-lg)',
-            background: mine ? 'var(--dsw-alias-button-primary-fill)' : 'var(--dsw-alias-bg-layer-1)',
-            color: mine ? 'var(--dsw-alias-label-primary-foreground)' : 'var(--dsw-alias-label-primary)',
-            boxShadow: mine ? 'none' : 'inset 0 0 0 .5px var(--dsw-alias-border-l1)',
-            fontSize: 13,
-            lineHeight: 1.55,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          },
-        }, message.text)
+        ? (mine
+          ? h('div', {
+            style: {
+              padding: '8px 12px',
+              borderRadius: 'var(--dsw-radius-lg)',
+              background: 'var(--dsw-alias-bg-layer-2)',
+              color: 'var(--dsw-alias-label-primary)',
+              fontSize: 13,
+              lineHeight: 1.6,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            },
+          }, message.text)
+          : h('div', { className: 'pair-md-wrap' }, h(MarkdownText, { text: message.text })))
         : null,
       h(ImageGroup, { images: message.images }),
       h('div', {
