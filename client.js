@@ -715,6 +715,9 @@ window.__ModuleLoader__.load({
     // -----------------------------------------------------------------------
     // 基础
     // -----------------------------------------------------------------------
+    // 页面（client.js）自身的构建版本：用来判断页面是否已经换到新代码。
+    const CLIENT_BUILD = '0.4.33'
+
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
         ? window.__DSH_PAIR_TOKEN__
@@ -2480,13 +2483,13 @@ window.__ModuleLoader__.load({
         }, h(PairIcon, { size: 17 })),
         h('div', { style: { flex: 1, minWidth: 0 } },
           h('div', { style: { fontSize: 14, lineHeight: '22px', fontWeight: 600 } },
-            isHost ? '本机' : `远程电脑`,
+            isHost ? '本机' : '远程电脑',
             h('span', {
               style: {
                 fontWeight: 400, fontSize: 11, marginLeft: 6,
                 color: 'var(--dsw-alias-label-tertiary)',
               },
-            }, isHost ? (linked ? '已配对手机' : `${info.clients || 0} 台设备`) : (info.host || ''))),
+            }, `v${CLIENT_BUILD}`)),
           h('div', {
             style: {
               fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)',
@@ -2495,8 +2498,8 @@ window.__ModuleLoader__.load({
           },
           h(Dot, { tone: statusTone }),
           isHost
-            ? (info.configured ? '作为主机等待手机' : '未配置配对密钥')
-            : (treeError ? '连不上电脑' : '已连上电脑'))),
+            ? (info.configured ? `${info.clients || 0} 台设备 · 主机模式` : '未配置配对密钥')
+            : (treeError ? '连不上电脑' : (linked ? '已连上电脑' : '未配对')))),
         h(Button, {
           kind: 'ghost',
           size: 'sm',
