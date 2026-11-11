@@ -355,12 +355,11 @@ window.__ModuleLoader__.load({
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 8px 10px;
+  padding: 2px 4px;
   border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-layer-2);
-  box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l1);
+  background: transparent;
 }
-.pair-file-head { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.pair-file-head { display: flex; align-items: center; gap: 6px; min-width: 0; width: 100%; text-align: left; font-family: inherit; }
 .pair-file-tool {
   flex: 0 0 auto;
   font-size: 11px;
@@ -1375,24 +1374,18 @@ window.__ModuleLoader__.load({
       const oldText = String(message.oldText || '')
       const content = body || oldText
       const isWrite = message.tool === 'write'
-      const preview = content.length > 220 ? `${content.slice(0, 220)}…` : content
       return h('div', { className: 'pair-file-edit' },
-        h('div', { className: 'pair-file-head' },
-          h('span', { className: 'pair-file-tool' }, isWrite ? '写入' : '编辑'),
-          h('code', { className: 'pair-file-path' }, message.text),
-          h('span', { className: 'pair-file-stat' }, `+${message.added ?? 0} -${message.removed ?? 0}`)),
-        content
-          ? (open
-            ? h('pre', { className: 'pair-file-code' }, content)
-            : h('div', { className: 'pair-file-preview' }, preview))
-          : h('div', { className: 'pair-hint' }, '内容为空或不是文本'),
-        content
-          ? h('button', {
-            type: 'button',
-            className: 'pair-more',
-            onClick: () => setOpen((value) => !value),
-          }, open ? '收起' : `展开全文（${content.length} 字）`)
-          : null)
+        h('button', {
+          type: 'button',
+          className: 'pair-file-head',
+          onClick: () => { if (content) setOpen((value) => !value) },
+          style: { background: 'transparent', border: 'none', padding: 0, cursor: content ? 'pointer' : 'default' },
+        },
+        h('span', { className: 'pair-file-tool' }, isWrite ? '写入' : '编辑'),
+        h('code', { className: 'pair-file-path' }, message.text),
+        h('span', { className: 'pair-file-stat' }, `+${message.added ?? 0} -${message.removed ?? 0}`),
+        content ? h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›') : null),
+        open && content ? h('pre', { className: 'pair-file-code' }, content) : null)
     }
 
     function inlineNodes(text) {
