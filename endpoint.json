@@ -1,7 +1,7 @@
 {
   "device": "Ma",
   "url": "https://enable-knock-echo-trackbacks.trycloudflare.com",
-  "ts": 1794361064431,
+  "ts": 1794361232114,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "bwBVsDJGGHeWS7lYeBXhirWZx8BkX7Lvv3iSvdefnUttM5mUW/GFhGLw2ccycElrwKA2/J2pNJSNRYF742pvDQ=="
+  "sig": "vTXZBlHlCefvBoTOKMOsriki+52W/ILKrnS7jDJZC+IF8Z32xRG7MKZ3bwqdxp/Uo3s4V1fVmIQXwV7DTDsdBg=="
 }
