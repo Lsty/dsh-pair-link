@@ -712,9 +712,12 @@ body.pair-modal-open .pair-modal { user-select: text; }
 .pair-tool-caret { font-size: 9px; color: var(--dsw-alias-label-tertiary); }
 
 @media (min-width: 600px) {
-  .pair-panes { display: flex; gap: 14px; flex: 1; min-height: 0; }
-  .pair-tree-pane { width: 272px; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
+  .pair-panes { display: flex; gap: 16px; flex: 1; min-height: 0; }
+  .pair-tree-pane { width: 280px; flex: 0 0 auto; display: flex; flex-direction: column; min-height: 0; gap: 8px; }
   .pair-detail-pane { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+@media (min-width: 840px) {
+  .pair-tree-pane { width: 320px; }
+}
 }
 @media (max-width: 599px) {
   .pair-panes { display: flex; flex-direction: column; flex: 1; min-height: 0; }
@@ -731,7 +734,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.42'
+    const CLIENT_BUILD = '0.4.43'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -2543,7 +2546,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
             ? 'warn'
             : 'ok'
 
-      const header = h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto' } },
+      const header = h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flex: '0 0 auto', minHeight: 52 } },
         h('div', {
           style: {
             width: 28, height: 28, borderRadius: 'var(--dsw-radius-md)',
