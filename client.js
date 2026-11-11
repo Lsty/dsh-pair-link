@@ -404,6 +404,8 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
 }
 .pair-modal-body { padding: 14px 16px; overflow-y: auto; }
+body.pair-modal-open .pair-page { user-select: none; }
+body.pair-modal-open .pair-modal { user-select: text; }
 .pair-file-edit {
   display: flex;
   flex-direction: column;
@@ -716,7 +718,7 @@ window.__ModuleLoader__.load({
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.38'
+    const CLIENT_BUILD = '0.4.39'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1425,6 +1427,12 @@ window.__ModuleLoader__.load({
     }
 
     function FilePreviewModal({ preview, onClose }) {
+      React.useEffect(() => {
+        if (!preview) return undefined
+        // 弹层打开期间让页面其它部分不可选，Ctrl+A 只会选中弹层内容
+        document.body.classList.add('pair-modal-open')
+        return () => document.body.classList.remove('pair-modal-open')
+      }, [preview])
       if (!preview) return null
       return h('div', { className: 'pair-modal-backdrop', onClick: onClose },
         h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation() },
@@ -2592,6 +2600,7 @@ window.__ModuleLoader__.load({
           }, h(Empty, null, '从左边选一个会话')))
 
       return h('div', {
+        className: 'pair-page',
         style: {
           display: 'flex', flexDirection: 'column', gap: 10,
           height: '100%', minHeight: 420, padding: '14px 16px 18px',
