@@ -79,10 +79,11 @@ window.__ModuleLoader__.load({
 .pair-ws {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   box-sizing: border-box;
   min-width: 0;
+  min-height: 36px;
   padding: 6px 8px;
   border: none;
   background: transparent;
@@ -482,7 +483,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
 .pair-search { position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; background: var(--dsw-alias-bg-layer-1); }
 .pair-search input {
   width: 100%;
-  height: 30px;
+  height: 36px;
   padding: 0 10px;
   box-sizing: border-box;
   border: none;
@@ -741,7 +742,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.45'
+    const CLIENT_BUILD = '0.4.46'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
