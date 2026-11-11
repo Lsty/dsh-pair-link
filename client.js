@@ -2489,7 +2489,7 @@ window.__ModuleLoader__.load({
                 fontWeight: 400, fontSize: 11, marginLeft: 6,
                 color: 'var(--dsw-alias-label-tertiary)',
               },
-            }, `v${CLIENT_BUILD}`)),
+            }, `v${info && info.version ? info.version : CLIENT_BUILD}`)),
           h('div', {
             style: {
               fontSize: 11, lineHeight: '16px', color: 'var(--dsw-alias-label-tertiary)',
