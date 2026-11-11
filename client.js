@@ -481,6 +481,15 @@ window.__ModuleLoader__.load({
   line-height: 1.6;
 }
 .pair-reasoning-box { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.pair-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-right: 2px;
+}
 .pair-reasoning-toggle {
   display: flex;
   align-items: center;
@@ -2336,7 +2345,9 @@ window.__ModuleLoader__.load({
 
       const treePane = h('div', { className: 'pair-tree-pane' },
         showConfig
-          ? h(React.Fragment, null,
+          ? h('div', { className: 'pair-scroll' },
+            h('div', { style: { display: 'flex', justifyContent: 'flex-end', flex: '0 0 auto' } },
+              h(Button, { kind: 'ghost', size: 'sm', onClick: () => setShowConfig(false) }, '收起')),
             h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } }),
             isHost ? h(TunnelCard, { info }) : null)
           : h(React.Fragment, null,
