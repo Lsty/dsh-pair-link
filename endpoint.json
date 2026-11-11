@@ -1,7 +1,7 @@
 {
   "device": "Ma",
   "url": "https://preliminary-compiled-quizzes-chicago.trycloudflare.com",
-  "ts": 1794366679274,
+  "ts": 1794366726603,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "TIppjOexq+OBBS+WIkU+i8NCR/XpuYe/UDmUiOK18x55rqqS9KF1/YDqbJPE3IA/9UCGlUzu11WepGNE03ZwAg=="
+  "sig": "P+qf2M7IVZaNHzgb4z/JtRd0GYq6Qupl3r9+az6B/RaZfOU0FvxOtI/OEHrAUpERmMame8Co1DzufJEGYMiBAg=="
 }
