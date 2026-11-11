@@ -458,6 +458,49 @@ window.__ModuleLoader__.load({
 }
 .pair-ws-more:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .pair-menu-danger { color: var(--dsw-alias-state-error-primary) !important; }
+.pair-file-stat {
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pair-tool-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 4px;
+  font-size: 11px;
+  line-height: 17px;
+  color: var(--dsw-alias-label-tertiary);
+  min-width: 0;
+}
+.pair-tool-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pair-thinking {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 4px 4px;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  flex: 0 0 auto;
+}
+.pair-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--dsw-alias-state-business-primary);
+  animation: pair-pulse 1.2s ease-in-out infinite;
+}
+@keyframes pair-pulse {
+  0%, 100% { opacity: .3; }
+  50% { opacity: 1; }
+}
 .pair-row-more {
   border: none;
   background: transparent;
@@ -1258,8 +1301,9 @@ window.__ModuleLoader__.load({
       const preview = content.length > 220 ? `${content.slice(0, 220)}…` : content
       return h('div', { className: 'pair-file-edit' },
         h('div', { className: 'pair-file-head' },
-          h('span', { className: 'pair-file-tool' }, isWrite ? '写入' : '修改'),
-          h('code', { className: 'pair-file-path' }, message.text)),
+          h('span', { className: 'pair-file-tool' }, isWrite ? '写入' : '编辑'),
+          h('code', { className: 'pair-file-path' }, message.text),
+          h('span', { className: 'pair-file-stat' }, `+${message.added ?? 0} -${message.removed ?? 0}`)),
         content
           ? (open
             ? h('pre', { className: 'pair-file-code' }, content)
@@ -1297,12 +1341,9 @@ window.__ModuleLoader__.load({
         }, message.text)
       }
       if (role === 'tool') {
-        return h('div', {
-          style: {
-            fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', padding: '1px 4px',
-            fontFamily: 'var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, monospace)',
-          },
-        }, message.text)
+        return h('div', { className: 'pair-tool-row' },
+          h('span', { className: 'pair-tool-caret' }, '▸'),
+          h('span', { className: 'pair-tool-text' }, message.text))
       }
       const mine = role === 'user'
       return h('div', {
@@ -1676,6 +1717,11 @@ window.__ModuleLoader__.load({
             e.target.value = ''
           },
         }),
+        running
+          ? h('div', { className: 'pair-thinking' },
+            h('span', { className: 'pair-thinking-dot' }),
+            h('span', null, '深度求索中…'))
+          : null,
         h('div', { className: 'pair-composer' },
           h('textarea', {
             className: 'pair-textarea',

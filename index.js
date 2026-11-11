@@ -31,7 +31,7 @@ export const name = 'dsh-pair-link'
 
 export const inject = ['webServer']
 
-const VERSION = '0.4.20'
+const VERSION = '0.4.21'
 const WS_GUID = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
 const APPROVAL_TIMEOUT_MS = 15 * 60_000
 const MAX_FRAME_BYTES = 8 * 1024 * 1024
@@ -256,6 +256,8 @@ function toDisplayMessage(event) {
       if (filePath) {
         const body = String(args?.content ?? args?.new_string ?? '')
         const oldText = String(args?.old_string ?? '')
+        const added = body ? body.split('\n').length : 0
+        const removed = oldText ? oldText.split('\n').length : 0
         return {
           seq,
           time,
@@ -264,9 +266,26 @@ function toDisplayMessage(event) {
           text: filePath,
           body,
           oldText,
+          added,
+          removed,
           callId: String(data.callId ?? ''),
         }
       }
+    }
+    if (name === 'read') {
+      const args = parseToolArgs(data.arguments)
+      const filePath = String(args?.file_path ?? args?.path ?? '')
+      if (filePath) return { seq, time, role: 'tool', text: `读取 · ${fileTail(filePath)}` }
+    }
+    if (name === 'pwsh') {
+      const args = parseToolArgs(data.arguments)
+      const desc = String(args?.description ?? '').trim()
+      return { seq, time, role: 'tool', text: `运行命令 · ${desc || '命令'}` }
+    }
+    if (name === 'plugin_manager') {
+      const args = parseToolArgs(data.arguments)
+      const action = String(args?.action ?? '').trim()
+      return { seq, time, role: 'tool', text: `插件 · ${action || '操作'}` }
     }
     return { seq, time, role: 'tool', text: name }
   }
@@ -275,6 +294,12 @@ function toDisplayMessage(event) {
     if (kind && kind !== 'completed') return { seq, time, role: 'system', text: `本轮结束：${kind}` }
   }
   return null
+}
+
+/** 路径最后一段，用于工具行摘要。 */
+function fileTail(value) {
+  const parts = String(value ?? '').split(/[\\/]/).filter(Boolean)
+  return parts.length > 0 ? parts[parts.length - 1] : String(value ?? '')
 }
 
 /** 解析工具调用的 arguments（字符串或已解析对象）。 */

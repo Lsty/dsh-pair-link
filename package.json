@@ -1,6 +1,6 @@
 {
   "name": "dsh-pair-link",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "description": "用手机上的第三方 DSH 远程控制电脑 DSH 会话：左侧栏「远程电脑」入口，看会话、读消息、发消息、审批（零依赖，host/client 双模式）",
   "type": "module",
   "main": "index.js",
