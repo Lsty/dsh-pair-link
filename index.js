@@ -1064,15 +1064,19 @@ function basenameOf(path) {
 function applyHostRoutes(ctx, runtime, sessions) {
   const route = (kind, path, handler) => ctx.effect(() => ctx.webServer.register({ kind, path, handler }))
 
-  // 页面令牌：优先校验注入的 token；同源页面也放行，
-  // 这样浏览器缓存了旧 HTML 时不会整页 403。
+  // 页面令牌：优先校验注入的 token；本机请求也放行，
+  // 这样浏览器缓存了旧 HTML、或 Electron 壳不带 referer 时不会整页 403。
+  // 远程（经隧道）请求仍必须带配对密钥，不会被这条放行影响。
   const pageOk = (req) => {
     const header = String(req.headers[PAGE_TOKEN_HEADER] ?? '')
     if (safeEqual(header, runtime.pageToken)) return true
+    const remote = String(req.socket?.remoteAddress ?? '')
+    const local = remote === '127.0.0.1' || remote === '::1' || remote === '::ffff:127.0.0.1'
+    if (!local) return false
     const host = String(req.headers.host ?? '')
     const source = String(req.headers.referer ?? req.headers.origin ?? '')
-    if (host && source && source.includes(`//${host}`)) return true
-    return false
+    if (!source) return true
+    return Boolean(host) && source.includes(`//${host}`)
   }
 
   const authorize = (req) => {
