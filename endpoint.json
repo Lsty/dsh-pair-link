@@ -1,7 +1,7 @@
 {
   "device": "Ma",
   "url": "https://being-vacancies-laptops-opt.trycloudflare.com",
-  "ts": 1794360877974,
+  "ts": 1794361005610,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "o5jqaRqKB8njP2bGCDHOLWaSUpG526RsBfPDSYnbbwowTSfDXGB/U4iO3HpXZfbGEOtP+tqpHQ9l7eKGeQjDDQ=="
+  "sig": "E4FMQy2qgLCe3zqOOMGmVinad54c+gHK9Xb6xn8QwBCi/YUTlj2yLLwIPfYIc+gn5bc5WAEdWkjjZO1ekzloAw=="
 }
