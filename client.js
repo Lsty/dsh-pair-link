@@ -132,22 +132,60 @@ window.__ModuleLoader__.load({
 .pair-textarea {
   box-sizing: border-box;
   width: 100%;
-  flex: 1;
   min-width: 0;
   resize: none;
-  border: .5px solid var(--dsw-alias-border-l4);
-  border-radius: var(--dsw-radius-md);
-  background: var(--dsw-alias-bg-layer-1);
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: var(--dsw-alias-label-primary);
   font-family: inherit;
   font-size: 14px;
   line-height: 22px;
-  padding: 8px 10px;
+  padding: 2px 2px 0;
   outline: none;
+  box-shadow: none;
   min-height: 44px;
 }
-.pair-textarea:focus { border-color: var(--dsw-alias-state-business-primary); }
+.pair-textarea:focus { box-shadow: none; }
 .pair-textarea::placeholder { color: var(--dsw-alias-label-dimmed); }
+.pair-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px 8px;
+  border-radius: 20px;
+  background: var(--dsw-alias-bg-layer-2);
+  box-shadow: inset 0 0 0 .5px var(--dsw-alias-border-l1);
+  flex: 0 0 auto;
+}
+.pair-composer:focus-within { box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary); }
+.pair-composer-bar { display: flex; align-items: center; gap: 8px; }
+.pair-icon-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 999px;
+  border: none;
+  background: var(--dsw-alias-bg-layer-3);
+  color: var(--dsw-alias-label-secondary);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.pair-icon-btn:hover { background: var(--dsw-alias-interactive-bg-hover); }
+.pair-send-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: none;
+  background: var(--dsw-alias-state-business-primary);
+  color: #fff;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.pair-send-btn:disabled { opacity: .4; cursor: default; }
 
 .pair-label { display: block; font-size: 12px; line-height: 18px; margin: 12px 0 6px; color: var(--dsw-alias-label-secondary); }
 .pair-hint { font-size: 11.5px; line-height: 1.65; color: var(--dsw-alias-label-secondary); }
@@ -826,6 +864,22 @@ window.__ModuleLoader__.load({
     // -----------------------------------------------------------------------
     // 工作区 / 会话树
     // -----------------------------------------------------------------------
+    function FolderIcon({ size = 14 }) {
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        style: { flex: '0 0 auto', color: 'var(--dsw-alias-label-tertiary)' },
+      },
+      h('path', {
+        d: 'M1.5 3.5h4l1.2 1.5h7.8v7.5a1 1 0 0 1-1 1H1.5a1 1 0 0 1-1-1v-8a1 1 0 0 1 1-1Z',
+        stroke: 'currentColor',
+        strokeWidth: 1.2,
+        strokeLinejoin: 'round',
+      }))
+    }
+
     function SessionRow({ session, active, onOpen, onMenu }) {
       const title = session.title && session.title.trim()
         ? session.title
@@ -900,6 +954,7 @@ window.__ModuleLoader__.load({
                 onClick: toggle,
               },
               h('span', { className: 'pair-ws-caret' }, collapsedNow ? '›' : '⌄'),
+              h(FolderIcon, null),
               h('span', { className: 'pair-ws-title' }, label),
               h('span', { className: 'pair-ws-count' }, String(visible.length))),
               workspaceId && onCreate
@@ -1621,19 +1676,12 @@ window.__ModuleLoader__.load({
             e.target.value = ''
           },
         }),
-        h('div', { style: { display: 'flex', gap: 6, alignItems: 'flex-end', flex: '0 0 auto' } },
-          h(Button, {
-            kind: 'ghost',
-            size: 'sm',
-            onClick: () => { if (fileRef.current) fileRef.current.click() },
-            title: '添加图片或文件',
-            style: { height: 44, padding: '0 10px', fontSize: 16 },
-          }, '📎'),
+        h('div', { className: 'pair-composer' },
           h('textarea', {
             className: 'pair-textarea',
             value: draft,
             rows: 2,
-            placeholder: pending.length > 0 ? '给这些附件加一句话（可留空）…' : '发到电脑上的这个会话…',
+            placeholder: pending.length > 0 ? '给这些附件加一句话（可留空）…' : '发消息或创建任务，/ 调用指令，@ 文件…',
             onChange: (e) => setDraft(e.target.value),
             onKeyDown: (e) => {
               if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -1642,12 +1690,22 @@ window.__ModuleLoader__.load({
               }
             },
           }),
-          h(Button, {
-            kind: 'primary',
-            onClick: send,
-            disabled: sending || (!draft.trim() && pending.length === 0),
-            style: { minWidth: 64 },
-          }, sending ? '发送中…' : '发送')))
+          h('div', { className: 'pair-composer-bar' },
+            h('button', {
+              type: 'button',
+              className: 'pair-icon-btn',
+              onClick: () => { if (fileRef.current) fileRef.current.click() },
+              title: '添加图片或文件',
+            }, '＋'),
+            h('span', { className: 'pair-hint', style: { flex: 1, minWidth: 0 } },
+              pending.length > 0 ? `${pending.length} 个附件待发送` : ''),
+            h('button', {
+              type: 'button',
+              className: 'pair-send-btn',
+              onClick: send,
+              disabled: sending || (!draft.trim() && pending.length === 0),
+              title: '发送',
+            }, sending ? '…' : '↑'))))
     }
 
     // -----------------------------------------------------------------------
