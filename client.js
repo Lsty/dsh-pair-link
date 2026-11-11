@@ -164,6 +164,13 @@ window.__ModuleLoader__.load({
 }
 .pair-composer:focus-within { box-shadow: inset 0 0 0 1px var(--dsw-alias-state-business-primary); }
 .pair-composer-bar { display: flex; align-items: center; gap: 8px; }
+.pair-composer-bar .pair-tool {
+  height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+  max-width: 46%;
+  overflow: hidden;
+}
 .pair-icon-btn {
   width: 44px;
   height: 44px;
@@ -734,7 +741,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.43'
+    const CLIENT_BUILD = '0.4.45'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1954,8 +1961,6 @@ body.pair-modal-open .pair-modal { user-select: text; }
           : null)
 
       const toolbar = h('div', { className: 'pair-toolbar' },
-        h(ModelPicker, { meta, onPick: pickModel }),
-        h(PermissionPicker, { meta, onPick: pickPermission }),
         h('button', {
           type: 'button',
           className: 'pair-tool',
@@ -2092,8 +2097,10 @@ body.pair-modal-open .pair-modal { user-select: text; }
               onClick: () => { if (fileRef.current) fileRef.current.click() },
               title: '添加图片或文件',
             }, '＋'),
+            h(PermissionPicker, { meta, onPick: pickPermission }),
+            h(ModelPicker, { meta, onPick: pickModel }),
             h('span', { className: 'pair-hint', style: { flex: 1, minWidth: 0 } },
-              pending.length > 0 ? `${pending.length} 个附件待发送` : ''),
+              pending.length > 0 ? `${pending.length} 个附件` : ''),
             h('button', {
               type: 'button',
               className: 'pair-send-btn',

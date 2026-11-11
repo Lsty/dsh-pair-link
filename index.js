@@ -283,28 +283,58 @@ function toDisplayMessage(event) {
         }
       }
     }
-    if (name === 'read') {
-      const args = parseToolArgs(data.arguments)
-      const filePath = String(args?.file_path ?? args?.path ?? '')
-      if (filePath) return { seq, time, role: 'tool', text: `读取 · ${fileTail(filePath)}` }
-    }
-    if (name === 'pwsh') {
-      const args = parseToolArgs(data.arguments)
-      const desc = String(args?.description ?? '').trim()
-      return { seq, time, role: 'tool', text: `运行命令 · ${desc || '命令'}` }
-    }
     if (name === 'plugin_manager') {
       const args = parseToolArgs(data.arguments)
       const action = String(args?.action ?? '').trim()
       return { seq, time, role: 'tool', text: `插件 · ${action || '操作'}` }
     }
-    return { seq, time, role: 'tool', text: name }
+    return {
+      seq,
+      time,
+      role: 'tool',
+      text: `${toolLabelOf(name)} · ${toolSummaryOf(name, parseToolArgs(data.arguments))}`,
+    }
   }
   if (type === 'turn/end') {
     const kind = event.data?.reason?.kind
     if (kind && kind !== 'completed') return { seq, time, role: 'system', text: `本轮结束：${kind}` }
   }
   return null
+}
+
+/** 工具分类（对齐 DSHM 的 ToolPresentation）：返回中文类别名。 */
+function toolLabelOf(name) {
+  const n = String(name ?? '').toLowerCase()
+  if (/bash|pwsh|terminal|shell|exec/.test(n)) return '终端'
+  if (/str_replace|edit|replace/.test(n)) return '编辑'
+  if (/write|create/.test(n)) return '写入'
+  if (/read|cat/.test(n)) return '读取'
+  if (/grep|glob|find|search_file/.test(n)) return '搜索'
+  if (/web|fetch|http/.test(n)) return '网络'
+  if (/image|photo|screenshot/.test(n)) return '图像'
+  if (/ask_user|question/.test(n)) return '提问'
+  return '工具'
+}
+
+/** 工具行摘要：从参数里挑最有信息量的一小段。 */
+function toolSummaryOf(name, args) {
+  const n = String(name ?? '').toLowerCase()
+  if (/bash|pwsh|terminal|shell|exec/.test(n)) {
+    const desc = String(args?.description ?? '').trim()
+    if (desc) return desc
+    const cmd = String(args?.command ?? '').trim().split('\n')[0]
+    return cmd.slice(0, 80) || '命令'
+  }
+  if (/grep|glob|find|search_file/.test(n)) {
+    return String(args?.pattern ?? args?.query ?? '').trim().slice(0, 60) || '搜索'
+  }
+  if (/web|fetch|http/.test(n)) {
+    return String(args?.query ?? args?.url ?? '').trim().slice(0, 60) || '网络'
+  }
+  if (/read|cat/.test(n)) {
+    return fileTail(String(args?.file_path ?? args?.path ?? '')) || '文件'
+  }
+  return String(name ?? '工具')
 }
 
 /** 路径最后一段，用于工具行摘要。 */
