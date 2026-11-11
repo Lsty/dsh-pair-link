@@ -480,6 +480,41 @@ window.__ModuleLoader__.load({
   font-size: 12px;
   line-height: 1.6;
 }
+.pair-reasoning-box { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+.pair-reasoning-toggle {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  padding: 2px 0;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.pair-reasoning-toggle:hover { color: var(--dsw-alias-label-secondary); }
+.pair-reasoning-icon { flex: 0 0 auto; font-size: 11px; }
+.pair-reasoning-summary {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pair-reasoning {
+  padding: 8px 10px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  font-size: 12px;
+  line-height: 1.65;
+  color: var(--dsw-alias-label-secondary);
+  max-height: 280px;
+  overflow: auto;
+}
 .pair-file-stat {
   flex: 0 0 auto;
   font-size: 11px;
@@ -1201,13 +1236,20 @@ window.__ModuleLoader__.load({
     function Reasoning({ text }) {
       const [open, setOpen] = React.useState(false)
       if (!text) return null
-      return h('div', { style: { display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 } },
+      const flat = String(text).replace(/\s+/g, ' ').trim()
+      const summary = flat.length > 64 ? `${flat.slice(0, 64)}…` : flat
+      return h('div', { className: 'pair-reasoning-box' },
         h('button', {
           type: 'button',
           className: 'pair-reasoning-toggle',
           onClick: () => setOpen((value) => !value),
-        }, (open ? '⌄' : '›') + ' 思考过程'),
-        open ? h('div', { className: 'pair-reasoning' }, text) : null)
+        },
+        h('span', { className: 'pair-reasoning-icon' }, '✳'),
+        h('span', { className: 'pair-reasoning-summary' }, open ? '思考' : `思考 · ${summary}`),
+        h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›')),
+        open
+          ? h('div', { className: 'pair-reasoning' }, h(MarkdownText, { text }))
+          : null)
     }
 
     function ImageGroup({ images }) {
