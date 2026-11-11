@@ -55,6 +55,8 @@ window.__ModuleLoader__.load({
   align-items: center;
   gap: 10px;
   width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   min-height: 40px;
   padding: 6px 10px;
   border: none;
@@ -79,6 +81,8 @@ window.__ModuleLoader__.load({
   align-items: center;
   gap: 6px;
   width: 100%;
+  box-sizing: border-box;
+  min-width: 0;
   padding: 6px 8px;
   border: none;
   background: transparent;
@@ -400,7 +404,7 @@ window.__ModuleLoader__.load({
   color: var(--dsw-alias-label-secondary);
 }
 
-.pair-tree { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; flex: 1; min-height: 120px; padding-right: 2px; }
+.pair-tree { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 120px; padding-right: 2px; box-sizing: border-box; width: 100%; }
 .pair-search { position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; background: var(--dsw-alias-bg-layer-1); }
 .pair-search input {
   width: 100%;
