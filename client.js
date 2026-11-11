@@ -716,7 +716,7 @@ window.__ModuleLoader__.load({
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.37'
+    const CLIENT_BUILD = '0.4.38'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1437,7 +1437,7 @@ window.__ModuleLoader__.load({
               : h(MarkdownText, { text: preview.content }))))
     }
 
-    function FileEditCard({ message }) {
+    function FileEditCard({ message, base }) {
       const [open, setOpen] = React.useState(false)
       const [preview, setPreview] = React.useState(null)
       const [busy, setBusy] = React.useState(false)
@@ -1451,7 +1451,7 @@ window.__ModuleLoader__.load({
         if (!isText || busy) return
         setBusy(true)
         try {
-          const data = await callJson('', `/dsh-pair/api/file?path=${encodeURIComponent(message.text)}`)
+          const data = await callJson(base || '', `/file?path=${encodeURIComponent(message.text)}`)
           setPreview({ path: data.path || message.text, content: String(data.content ?? '') })
         } catch (err) {
           setPreview({ path: message.text, error: String(err && err.message ? err.message : err) })
@@ -1568,7 +1568,7 @@ window.__ModuleLoader__.load({
       return h('div', { className: 'pair-md' }, blocks)
     }
 
-    function MessageBubble({ message, onAnswer, answering, cwd }) {
+    function MessageBubble({ message, onAnswer, answering, cwd, base }) {
       const [filePreview, setFilePreview] = React.useState(null)
       const role = message.role
 
@@ -1576,16 +1576,16 @@ window.__ModuleLoader__.load({
         const raw = String(value || '').trim()
         if (!raw) return raw
         if (/^[A-Za-z]:[\\/]/.test(raw) || raw.startsWith('/') || raw.startsWith('\\\\')) return raw
-        const base = String(cwd || '').replace(/[\\/]+$/, '')
-        if (!base) return raw
-        return `${base}\\${raw.replace(/^[.\\/]+/, '')}`
+        const basePath = String(cwd || '').replace(/[\\/]+$/, '')
+        if (!basePath) return raw
+        return `${basePath}\\${raw.replace(/^[.\\/]+/, '')}`
       }
 
       const openFile = async (filePath) => {
         if (!filePath) return
         const full = resolvePath(filePath)
         try {
-          const data = await callJson('', `/dsh-pair/api/file?path=${encodeURIComponent(full)}`)
+          const data = await callJson(base || '', `/file?path=${encodeURIComponent(full)}`)
           setFilePreview({ path: data.path || full, content: String(data.content ?? '') })
         } catch (err) {
           setFilePreview({ path: full, error: String(err && err.message ? err.message : err) })
@@ -1596,7 +1596,7 @@ window.__ModuleLoader__.load({
         return h(QuestionCard, { message, onAnswer, busy: answering, readOnly: true })
       }
       if (role === 'file-edit') {
-        return h(FileEditCard, { message })
+        return h(FileEditCard, { message, base })
       }
       if (role === 'tool-image') {
         return h('div', { style: { alignSelf: 'flex-start', maxWidth: '88%' } },
@@ -1945,6 +1945,7 @@ window.__ModuleLoader__.load({
                 onAnswer: answerQuestion,
                 answering: answering === message.callId,
                 cwd: session.cwd,
+                base,
               })),
             ]
           })()),
