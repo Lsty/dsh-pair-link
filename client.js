@@ -820,7 +820,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.55'
+    const CLIENT_BUILD = '0.4.56'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1496,7 +1496,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
           className: 'pair-reasoning-toggle',
           onClick: () => setOpen((value) => !value),
         },
-        h('span', { className: 'pair-reasoning-icon' }, '✳'),
+        h(SparkIcon, null),
         h('span', { className: 'pair-reasoning-summary' }, open ? '思考' : `思考 · ${summary}`),
         h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›')),
         open
@@ -1848,6 +1848,40 @@ body.pair-modal-open .pair-modal { user-select: text; }
     }
 
     /** 一个回合里的「过程」：思考、工具、文件改动都收在这里，折叠成一个分组。 */
+    /** 过程分组的图标（对应 DSHM 的 square_stack_3d）。 */
+    function ListIcon({ size = 12 }) {
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        style: { flex: '0 0 auto', color: 'var(--dsw-alias-label-tertiary)' },
+      },
+      h('path', {
+        d: 'M3 4h10M3 8h10M3 12h6',
+        stroke: 'currentColor',
+        strokeWidth: 1.2,
+        strokeLinecap: 'round',
+      }))
+    }
+
+    /** 思考的星花图标（对应 DSHM 的 reasoning 标记）。 */
+    function SparkIcon({ size = 12 }) {
+      return h('svg', {
+        width: size,
+        height: size,
+        viewBox: '0 0 16 16',
+        fill: 'none',
+        style: { flex: '0 0 auto', color: 'var(--dsw-alias-state-success-primary)' },
+      },
+      h('path', {
+        d: 'M8 1.8v12.4M1.8 8h12.4M3.5 3.5l9 9M12.5 3.5l-9 9',
+        stroke: 'currentColor',
+        strokeWidth: 1.1,
+        strokeLinecap: 'round',
+      }))
+    }
+
     function ProcessGroup({ items, base, cwd }) {
       const [open, setOpen] = React.useState(false)
       if (!Array.isArray(items) || items.length === 0) return null
@@ -1863,6 +1897,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
           onClick: () => setOpen((value) => !value),
         },
         h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›'),
+        h(ListIcon, null),
         h('span', { className: 'pair-process-title' }, '过程'),
         h('span', { className: 'pair-process-meta' }, parts.join(' · '))),
         open
@@ -1903,6 +1938,9 @@ body.pair-modal-open .pair-modal { user-select: text; }
 
       if (role === 'question') {
         return h(QuestionCard, { message, onAnswer, busy: answering, readOnly: true })
+      }
+      if (role === 'reasoning') {
+        return h(Reasoning, { text: message.text })
       }
       if (role === 'file-edit') {
         return h(FileEditCard, { message, base })
@@ -2249,14 +2287,33 @@ body.pair-modal-open .pair-modal { user-select: text; }
                 : null,
               (() => {
                 const blocks = []
+                const pushProcess = (item) => {
+                  const last = blocks[blocks.length - 1]
+                  if (last && last.type === 'process') last.items.push(item)
+                  else blocks.push({ type: 'process', items: [item] })
+                }
                 for (const message of visible) {
-                  if (message.role === 'tool' || message.role === 'file-edit') {
-                    const last = blocks[blocks.length - 1]
-                    if (last && last.type === 'process') last.items.push(message)
-                    else blocks.push({ type: 'process', items: [message] })
-                  } else {
-                    blocks.push({ type: 'single', message })
+                  if (message.role === 'assistant') {
+                    // 思考属于「过程」，正文才是回答
+                    if (message.reasoning && message.reasoning.trim()) {
+                      pushProcess({
+                        seq: message.seq,
+                        time: message.time,
+                        role: 'reasoning',
+                        text: message.reasoning,
+                      })
+                    }
+                    blocks.push({
+                      type: 'single',
+                      message: { ...message, reasoning: '' },
+                    })
+                    continue
                   }
+                  if (message.role === 'tool' || message.role === 'file-edit') {
+                    pushProcess(message)
+                    continue
+                  }
+                  blocks.push({ type: 'single', message })
                 }
                 return blocks.map((block, index) => (block.type === 'process'
                   ? h(ProcessGroup, { key: `p${index}`, items: block.items, base, cwd: session.cwd })
