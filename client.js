@@ -178,6 +178,13 @@ window.__ModuleLoader__.load({
   flex: 1 1 0;
   min-width: 0;
 }
+.pair-composer-bar .pair-tool > span:first-child {
+  overflow-x: auto;
+  white-space: nowrap;
+  text-overflow: clip;
+  scrollbar-width: none;
+}
+.pair-composer-bar .pair-tool > span:first-child::-webkit-scrollbar { display: none; }
 .pair-icon-btn {
   width: 44px;
   height: 44px;
@@ -779,7 +786,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.50'
+    const CLIENT_BUILD = '0.4.51'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -964,6 +971,25 @@ body.pair-modal-open .pair-modal { user-select: text; }
     /** 点外面关掉的浮层菜单。 */
     function PopMenu({ open, onClose, children, style }) {
       const ref = React.useRef(null)
+      const [pos, setPos] = React.useState(null)
+      React.useEffect(() => {
+        if (!open) {
+          setPos(null)
+          return undefined
+        }
+        // 按触发元素的位置算，改成 fixed 免得被 composer 的裁剪和滚动带偏
+        const frame = requestAnimationFrame(() => {
+          const node = ref.current
+          const anchor = node && node.parentElement
+          if (!anchor) return
+          const rect = anchor.getBoundingClientRect()
+          const width = Math.min(240, window.innerWidth - 16)
+          const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
+          const top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 260))
+          setPos({ left, top, width })
+        })
+        return () => cancelAnimationFrame(frame)
+      }, [open])
       React.useEffect(() => {
         if (!open) return undefined
         const onDown = (event) => {
@@ -974,7 +1000,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
         return () => document.removeEventListener('pointerdown', onDown, true)
       }, [open, onClose])
       if (!open) return null
-      return h('div', { ref, className: 'pair-menu', style }, children)
+      return h('div', { ref, className: 'pair-menu', style: { position: 'fixed', ...pos, ...style } }, children)
     }
 
     // -----------------------------------------------------------------------
