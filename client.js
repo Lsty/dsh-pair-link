@@ -786,7 +786,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.51'
+    const CLIENT_BUILD = '0.4.52'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1390,11 +1390,33 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // -----------------------------------------------------------------------
     // 对话详情
     // -----------------------------------------------------------------------
-    function Reasoning({ text }) {
-      const segments = String(text || '')
+    /** 把思考正文切成有意义的几段：丢掉纯时间戳/单字碎片，短段并入相邻段。 */
+    function groupReasoning(text) {
+      const raw = String(text || '')
         .split(/\n{2,}/)
         .map((part) => part.trim())
         .filter(Boolean)
+      const noise = (part) => {
+        if (/^\**\s*(时间|time)\s*[:：]?\s*\d{1,2}[:：]\d{2}/i.test(part)) return true
+        const bare = part.replace(/[\s*`#>\-]/g, '')
+        return bare.length < 8
+      }
+      const kept = []
+      for (const part of raw) {
+        if (noise(part)) continue
+        const last = kept[kept.length - 1]
+        // 短段（不足 40 字）并入上一段，避免「执行」「写」这种碎片各占一行
+        if (last !== undefined && (part.length < 40 || last.length < 40)) {
+          kept[kept.length - 1] = `${last}\n\n${part}`
+        } else {
+          kept.push(part)
+        }
+      }
+      return kept
+    }
+
+    function Reasoning({ text }) {
+      const segments = groupReasoning(text)
       if (segments.length === 0) return null
       return h('div', { className: 'pair-reasoning-box' },
         segments.map((segment, index) => h(ReasoningSegment, {
