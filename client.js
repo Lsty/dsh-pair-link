@@ -220,6 +220,38 @@ window.__ModuleLoader__.load({
 .pair-menu-anchor { position: relative; display: inline-flex; }
 .pair-menu-sub { display: flex; flex-direction: column; }
 .pair-menu-back { color: var(--dsw-alias-label-secondary); font-size: 12px; }
+.pair-process { display: flex; flex-direction: column; gap: 4px; }
+.pair-process-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  background: transparent;
+  padding: 2px 4px;
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--dsw-alias-label-tertiary);
+  cursor: pointer;
+  text-align: left;
+  min-width: 0;
+}
+.pair-process-toggle:hover { color: var(--dsw-alias-label-secondary); }
+.pair-process-title { flex: 0 0 auto; font-weight: 500; }
+.pair-process-meta {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pair-process-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 4px 0 4px 10px;
+  border-left: 2px solid var(--dsw-alias-border-l2);
+}
 .pair-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -788,7 +820,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.54'
+    const CLIENT_BUILD = '0.4.55'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1815,6 +1847,36 @@ body.pair-modal-open .pair-modal { user-select: text; }
       return h('div', { className: 'pair-md' }, blocks)
     }
 
+    /** 一个回合里的「过程」：思考、工具、文件改动都收在这里，折叠成一个分组。 */
+    function ProcessGroup({ items, base, cwd }) {
+      const [open, setOpen] = React.useState(false)
+      if (!Array.isArray(items) || items.length === 0) return null
+      const tools = items.filter((item) => item.role === 'tool').length
+      const edits = items.filter((item) => item.role === 'file-edit').length
+      const parts = []
+      if (tools > 0) parts.push(`${tools} 次调用`)
+      if (edits > 0) parts.push(`${edits} 处改动`)
+      return h('div', { className: 'pair-process' },
+        h('button', {
+          type: 'button',
+          className: 'pair-process-toggle',
+          onClick: () => setOpen((value) => !value),
+        },
+        h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›'),
+        h('span', { className: 'pair-process-title' }, '过程'),
+        h('span', { className: 'pair-process-meta' }, parts.join(' · '))),
+        open
+          ? h('div', { className: 'pair-process-body' },
+            items.map((item, index) => h(MessageBubble, {
+              key: `${item.seq}-${index}`,
+              message: item,
+              readOnly: true,
+              base,
+              cwd,
+            })))
+          : null)
+    }
+
     function MessageBubble({ message, onAnswer, answering, cwd, base }) {
       const [filePreview, setFilePreview] = React.useState(null)
       const role = message.role
@@ -2185,14 +2247,28 @@ body.pair-modal-open .pair-modal { user-select: text; }
                   },
                 }, `显示更早的 ${Math.min(24, hidden)} 条（还剩 ${hidden} 条）`)
                 : null,
-              visible.map((message, index) => h(MessageBubble, {
-                key: `seq-${message.seq}-${message.role}`,
-                message,
-                onAnswer: answerQuestion,
-                answering: answering === message.callId,
-                cwd: session.cwd,
-                base,
-              })),
+              (() => {
+                const blocks = []
+                for (const message of visible) {
+                  if (message.role === 'tool' || message.role === 'file-edit') {
+                    const last = blocks[blocks.length - 1]
+                    if (last && last.type === 'process') last.items.push(message)
+                    else blocks.push({ type: 'process', items: [message] })
+                  } else {
+                    blocks.push({ type: 'single', message })
+                  }
+                }
+                return blocks.map((block, index) => (block.type === 'process'
+                  ? h(ProcessGroup, { key: `p${index}`, items: block.items, base, cwd: session.cwd })
+                  : h(MessageBubble, {
+                    key: `s${block.message.seq}-${block.message.role}`,
+                    message: block.message,
+                    onAnswer: answerQuestion,
+                    answering: answering === block.message.callId,
+                    cwd: session.cwd,
+                    base,
+                  })))
+              })(),
             ]
           })()),
         queue.length > 0
