@@ -218,6 +218,8 @@ window.__ModuleLoader__.load({
 .pair-ok { font-size: 12px; line-height: 1.6; color: var(--dsw-alias-state-success-primary); }
 
 .pair-menu-anchor { position: relative; display: inline-flex; }
+.pair-menu-sub { display: flex; flex-direction: column; }
+.pair-menu-back { color: var(--dsw-alias-label-secondary); font-size: 12px; }
 .pair-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -786,7 +788,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.52'
+    const CLIENT_BUILD = '0.4.54'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -985,8 +987,10 @@ body.pair-modal-open .pair-modal { user-select: text; }
           const rect = anchor.getBoundingClientRect()
           const width = Math.min(240, window.innerWidth - 16)
           const left = Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))
-          const top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 260))
-          setPos({ left, top, width })
+          const top = Math.max(8, Math.min(rect.bottom + 6, window.innerHeight - 120))
+          // 剩下的可视高度决定菜单最大高度，否则底部会撑出屏幕、滑不到
+          const maxHeight = Math.max(160, window.innerHeight - top - 12)
+          setPos({ left, top, width, maxHeight })
         })
         return () => cancelAnimationFrame(frame)
       }, [open])
@@ -1281,6 +1285,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // -----------------------------------------------------------------------
     function ModelPicker({ meta, onPick, disabled }) {
       const [open, setOpen] = React.useState(false)
+      const [expanded, setExpanded] = React.useState(null)
       const current = meta && meta.model ? meta.model : null
       const models = meta && meta.models ? meta.models : null
       const label = current
@@ -1288,67 +1293,90 @@ body.pair-modal-open .pair-modal { user-select: text; }
         : '模型'
 
       const groups = models && Array.isArray(models.groups) ? models.groups : []
-      const options = []
+      // 同名模型合并成一条，推理强度作为二级选择
+      const entries = []
       for (const group of groups) {
         for (const model of group.models ?? []) {
           const efforts = model.reasoning && Array.isArray(model.reasoning.efforts) ? model.reasoning.efforts : []
-          if (efforts.length > 1) {
-            for (const effort of efforts) {
-              options.push({
-                key: `${group.id}/${model.id}/${effort.id}`,
-                group: group.name || group.id,
-                provider: group.id,
-                model,
-                effort: effort.id,
-                label: model.name || model.id,
-                sub: `${effort.name || effort.id}`,
-              })
-            }
-          } else {
-            options.push({
-              key: `${group.id}/${model.id}`,
-              group: group.name || group.id,
-              provider: group.id,
-              model,
-              effort: efforts[0] ? efforts[0].id : null,
-              label: model.name || model.id,
-              sub: model.description || '',
-            })
-          }
+          entries.push({
+            key: `${group.id}/${model.id}`,
+            group: group.name || group.id,
+            provider: group.id,
+            model,
+            efforts,
+          })
         }
       }
 
-      const activeKey = current
-        ? options.find((option) => option.model.id === current.model && (option.effort ?? null) === current.reasoningEffort)
-        : null
+      const pick = (entry, effortId) => {
+        setOpen(false)
+        setExpanded(null)
+        onPick({ provider: entry.provider, model: entry.model, effort: effortId ?? null })
+      }
 
-      const items = options.map((option) => h('button', {
-        key: option.key,
-        type: 'button',
-        className: 'pair-menu-item',
-        'data-active': activeKey && activeKey.key === option.key ? 'true' : 'false',
-        onClick: () => { setOpen(false); onPick(option) },
-      },
-      h('span', { className: 'pair-menu-check' }, activeKey && activeKey.key === option.key ? '✓' : ''),
-      h('span', { style: { flex: 1, minWidth: 0 } },
-        h('span', null, option.label),
-        h('small', null, option.sub ? `${option.group} · ${option.sub}` : option.group))))
+      const isCurrentEntry = (entry) => current
+        && current.model === entry.model.id
+        && (!current.provider || current.provider === entry.provider)
+
+      const renderEntry = (entry) => {
+        const active = isCurrentEntry(entry)
+        const activeEffort = active ? (current.reasoningEffort ?? null) : null
+        const currentEffort = entry.efforts.find((effort) => effort.id === activeEffort)
+        if (expanded === entry.key) {
+          return h('div', { key: entry.key, className: 'pair-menu-sub' },
+            h('button', {
+              type: 'button',
+              className: 'pair-menu-item pair-menu-back',
+              onClick: () => setExpanded(null),
+            }, '‹ 返回'),
+            entry.efforts.map((effort) => h('button', {
+              key: effort.id,
+              type: 'button',
+              className: 'pair-menu-item',
+              'data-active': activeEffort === effort.id ? 'true' : 'false',
+              onClick: () => pick(entry, effort.id),
+            },
+            h('span', { className: 'pair-menu-check' }, activeEffort === effort.id ? '✓' : ''),
+            h('span', { style: { flex: 1, minWidth: 0 } }, effort.name || effort.id))))
+        }
+        const multiple = entry.efforts.length > 1
+        return h('button', {
+          key: entry.key,
+          type: 'button',
+          className: 'pair-menu-item',
+          'data-active': active ? 'true' : 'false',
+          onClick: () => {
+            if (multiple) setExpanded(entry.key)
+            else pick(entry, entry.efforts[0] ? entry.efforts[0].id : null)
+          },
+        },
+        h('span', { className: 'pair-menu-check' }, active ? '✓' : ''),
+        h('span', { style: { flex: 1, minWidth: 0 } },
+          h('span', null, entry.model.name || entry.model.id),
+          h('small', null, activeEffort
+            ? `${entry.group} · ${currentEffort ? (currentEffort.name || currentEffort.id) : activeEffort}`
+            : entry.group)),
+        multiple ? h('span', { className: 'pair-tool-caret' }, '›') : null)
+      }
 
       return h('div', { className: 'pair-menu-anchor' },
         h('button', {
           type: 'button',
           className: 'pair-tool',
           disabled,
-          onClick: () => setOpen((value) => !value),
+          onClick: () => {
+            setExpanded(null)
+            setOpen((value) => !value)
+          },
           title: '模型',
         },
         h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis' } }, label),
         h('span', { className: 'pair-tool-caret' }, '▾')),
-        h(PopMenu, { open, onClose: () => setOpen(false) },
+        h(PopMenu, { open, onClose: () => { setOpen(false); setExpanded(null) } },
           h('div', { className: 'pair-menu-title' }, '模型'),
-          options.length === 0
+          entries.length === 0
             ? h('div', { className: 'pair-hint', style: { padding: '6px 8px' } }, '没有可切换的模型')
-            : items))
+            : entries.map(renderEntry)))
     }
 
     function PermissionPicker({ meta, onPick, disabled }) {
