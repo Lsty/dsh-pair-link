@@ -858,7 +858,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.65'
+    const CLIENT_BUILD = '0.4.66'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -2107,6 +2107,35 @@ body.pair-modal-open .pair-modal { user-select: text; }
           }
           setComparing({ onlyRemote, onlyLocal, differing, local, remote })
           savePair()
+          // 写一份说明，让在这个目录里工作的 agent 知道自己在哪台设备
+          try {
+            const deviceName = (info && info.device ? info.device : '本机')
+            const remoteName = (remote.device && remote.device.name) ? remote.device.name : '对端设备'
+            const note = [
+              '# 同步工作区说明',
+              '',
+              `- 当前设备：${deviceName}`,
+              `- 本机目录：${localDir}`,
+              `- 对端设备：${remoteName}`,
+              `- 对端目录：${remoteDir}`,
+              `- 最后比对：${new Date().toLocaleString()}`,
+              '',
+              '## 规则',
+              '',
+              '1. 本机改动会自动同步到对端，反之亦然',
+              '2. 同一个文件两边都改过时，以修改时间较新的为准',
+              '3. 删除不会传播（避免一边误删把另一边也清空）',
+              '',
+            ].join('\n')
+            await callJson(base, '/sync-write', {
+              method: 'POST',
+              body: JSON.stringify({
+                dir: remoteDir,
+                path: '同步说明.md',
+                base64: btoa(unescape(encodeURIComponent(note))),
+              }),
+            })
+          } catch { /* 说明文件写不进去不影响同步 */ }
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
         } finally {
