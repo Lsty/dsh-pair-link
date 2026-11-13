@@ -1,7 +1,7 @@
 {
   "device": "Ma",
   "url": "https://geology-postcards-informative-wednesday.trycloudflare.com",
-  "ts": 1794550826349,
+  "ts": 1794555399215,
   "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAUI4btQETPEc/P4WVGQyVjYuKKO+R3RHkeVZkDXUJPSM=\n-----END PUBLIC KEY-----\n",
-  "sig": "aXzVh8g48eQeoSDMNffudqXHGwUYSIEo7phavsPvtQbN7VGffv3toYZCFJG7XSEk6OEa0Tc0aDSjge75UPuOCg=="
+  "sig": "M0m1lRpV2iEkjjwc1jJhFRDh89i55B9XgljAA9z1j9R9TUsCnx+f1pyevv/7oWyXfMo1mtqqQeQLUGV07oemDw=="
 }
