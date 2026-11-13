@@ -924,6 +924,69 @@ function applySessionApi(ctx, runtime) {
     return readSyncPair()
   }
 
+  /** 启动后自动同步一次：本机 ↔ 对端，较新的覆盖较旧的。 */
+  async function autoSyncOnce() {
+    const pair = readSyncPair()
+    if (!pair.local || !pair.remote) return { ok: false, reason: '没有配置同步配对' }
+    const remote = runtime.remote
+    if (!remote || !remote.httpOrigin) return { ok: false, reason: '没有配对地址' }
+    const headers = { 'x-pair-token': runtime.secret, 'content-type': 'application/json' }
+    let local
+    try {
+      local = syncManifest(pair.local)
+    } catch (err) {
+      return { ok: false, reason: `本机清单失败：${err?.message ?? err}` }
+    }
+    let remoteData
+    try {
+      const res = await fetch(
+        `${remote.httpOrigin}/dsh-pair/api/sync?dir=${encodeURIComponent(pair.remote)}`,
+        { headers },
+      )
+      if (!res.ok) return { ok: false, reason: `对端返回 ${res.status}` }
+      remoteData = await res.json()
+    } catch (err) {
+      return { ok: false, reason: `连不上对端：${err?.message ?? err}` }
+    }
+    const remoteFiles = Array.isArray(remoteData.files) ? remoteData.files : []
+    const remoteMap = new Map(remoteFiles.map((file) => [file.path, file]))
+    const localMap = new Map(local.files.map((file) => [file.path, file]))
+    let pushed = 0
+    let pulled = 0
+    for (const [path, file] of localMap) {
+      const other = remoteMap.get(path)
+      if (other && other.sha256 === file.sha256) continue
+      if (other && other.mtime >= file.mtime) continue
+      try {
+        const data = syncRead(pair.local, path)
+        const res = await fetch(`${remote.httpOrigin}/dsh-pair/api/sync-write`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ dir: pair.remote, path, base64: data.base64 }),
+        })
+        if (res.ok) pushed += 1
+      } catch { /* 单个文件失败不影响其它 */ }
+    }
+    for (const [path, file] of remoteMap) {
+      const other = localMap.get(path)
+      if (other && other.sha256 === file.sha256) continue
+      if (other && other.mtime > file.mtime) continue
+      try {
+        const res = await fetch(`${remote.httpOrigin}/dsh-pair/api/sync-read`, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ dir: pair.remote, path }),
+        })
+        if (!res.ok) continue
+        const data = await res.json()
+        syncWrite(pair.local, path, data.base64)
+        pulled += 1
+      } catch { /* 同上 */ }
+    }
+    ctx.logger?.info?.('dsh-pair-link: 自动同步完成，推送 %d 个、拉取 %d 个', pushed, pulled)
+    return { ok: true, pushed, pulled, pair }
+  }
+
   /** 全量工作区（不按「有没有会话」过滤），给同步面板选目录用。 */
   async function listAllWorkspaces() {
     const registry = ctx.get?.('workspaceRegistry')
@@ -1315,6 +1378,7 @@ function syncWrite(rootDir, relPath, base64) {
     listAllWorkspaces,
     readSyncPair,
     writeSyncPair,
+    autoSyncOnce,
     createWorkspace,
     moveWorkspace,
     moveSession,
@@ -3061,9 +3125,23 @@ export function apply(ctx, config) {
   // 等 webServer 完成监听再起隧道
   const bootTimer = setTimeout(() => startQuickTunnel(ctx, runtime), 1200)
 
+  // 启动后自动同步一次（只有配了对端地址的一端才发起）
+  const syncTimer = runtime.remote
+    ? setTimeout(() => {
+      void sessions.autoSyncOnce()
+        .then((result) => {
+          if (result && result.ok === false && result.reason) {
+            ctx.logger?.info?.('dsh-pair-link: 自动同步跳过（%s）', result.reason)
+          }
+        })
+        .catch((err) => ctx.logger?.warn?.('dsh-pair-link: 自动同步失败 %s', err?.message ?? err))
+    }, 15000)
+    : null
+
   ctx.effect(() => () => {
     runtime.stopped = true
     clearTimeout(bootTimer)
+    if (syncTimer) clearTimeout(syncTimer)
     stopPairing(runtime)
     stopTunnel(runtime)
   })
