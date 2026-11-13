@@ -599,13 +599,51 @@ body.pair-modal-open .pair-modal { user-select: text; }
 .pair-md-pre {
   margin: 0;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: 0 0 10px 10px;
   background: var(--dsw-alias-bg-layer-2);
   overflow: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 12px;
   line-height: 1.6;
 }
+.pair-md-pre[data-wrap="true"] { white-space: pre-wrap; word-break: break-word; }
+.pair-code {
+  display: flex;
+  flex-direction: column;
+  border-radius: 10px;
+  background: var(--dsw-alias-bg-layer-2);
+  overflow: hidden;
+}
+.pair-code-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  border-bottom: .5px solid var(--dsw-alias-border-l1);
+}
+.pair-code-lang {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pair-code-btn {
+  flex: 0 0 auto;
+  border: none;
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 11px;
+  line-height: 20px;
+  padding: 0 6px;
+  border-radius: var(--dsw-radius-sm);
+  cursor: pointer;
+}
+.pair-code-btn:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .pair-reasoning-box { display: flex; flex-direction: column; gap: 2px; align-items: stretch; }
 .pair-reasoning-item { display: flex; flex-direction: column; gap: 2px; }
 .pair-scroll {
@@ -820,7 +858,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.59'
+    const CLIENT_BUILD = '0.4.60'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1807,11 +1845,12 @@ body.pair-modal-open .pair-modal { user-select: text; }
       while (i < lines.length) {
         const line = lines[i]
         if (/^```/.test(line)) {
+          const lang = line.slice(3).trim()
           const body = []
           i += 1
           while (i < lines.length && !/^```/.test(lines[i])) { body.push(lines[i]); i += 1 }
           i += 1
-          blocks.push(h('pre', { key: `pre${i}`, className: 'pair-md-pre' }, h('code', null, body.join('\n'))))
+          blocks.push(h(CodeBlock, { key: `pre${i}`, code: body.join('\n'), lang }))
           continue
         }
         const heading = /^(#{1,4})\s+(.*)$/.exec(line)
@@ -1848,6 +1887,38 @@ body.pair-modal-open .pair-modal { user-select: text; }
     }
 
     /** 一个回合里的「过程」：思考、工具、文件改动都收在这里，折叠成一个分组。 */
+    /** 代码块：带「自动换行」「复制」，对齐原生渲染。 */
+    function CodeBlock({ code, lang }) {
+      const [wrap, setWrap] = React.useState(false)
+      const [copied, setCopied] = React.useState(false)
+      const copy = async () => {
+        try {
+          await navigator.clipboard.writeText(code)
+          setCopied(true)
+          setTimeout(() => setCopied(false), 1500)
+        } catch { /* ignore */ }
+      }
+      return h('div', { className: 'pair-code' },
+        h('div', { className: 'pair-code-head' },
+          h('span', { className: 'pair-code-lang' }, lang || '代码块'),
+          h('button', {
+            type: 'button',
+            className: 'pair-code-btn',
+            onClick: () => setWrap((value) => !value),
+            title: wrap ? '取消自动换行' : '自动换行',
+          }, wrap ? '不换行' : '自动换行'),
+          h('button', {
+            type: 'button',
+            className: 'pair-code-btn',
+            onClick: copy,
+            title: '复制代码',
+          }, copied ? '已复制' : '复制')),
+        h('pre', {
+          className: 'pair-md-pre',
+          'data-wrap': wrap ? 'true' : 'false',
+        }, h('code', null, code)))
+    }
+
     /** 过程分组的图标（对应 DSHM 的 square_stack_3d）。 */
     function ListIcon({ size = 12 }) {
       return h('svg', {
