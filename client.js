@@ -820,7 +820,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.56'
+    const CLIENT_BUILD = '0.4.57'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1912,6 +1912,145 @@ body.pair-modal-open .pair-modal { user-select: text; }
           : null)
     }
 
+    /** 同步工作区：两边各出一份清单，对比后按方向传差异文件。 */
+    function SyncPanel({ base, onClose }) {
+      const [localDir, setLocalDir] = React.useState('')
+      const [remoteDir, setRemoteDir] = React.useState('')
+      const [busy, setBusy] = React.useState(false)
+      const [comparing, setComparing] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const [done, setDone] = React.useState(null)
+
+      const compare = async () => {
+        setError(null)
+        setDone(null)
+        setBusy(true)
+        try {
+          const remote = await callJson(base, `/sync?dir=${encodeURIComponent(remoteDir)}`)
+          const local = await callJson('', `/dsh-pair/api/sync?dir=${encodeURIComponent(localDir)}`)
+          const remoteMap = new Map((remote.files || []).map((file) => [file.path, file]))
+          const localMap = new Map((local.files || []).map((file) => [file.path, file]))
+          const onlyRemote = []
+          const onlyLocal = []
+          const differing = []
+          for (const [path, file] of remoteMap) {
+            const other = localMap.get(path)
+            if (!other) onlyRemote.push(file)
+            else if (other.sha256 !== file.sha256) differing.push({ path, remote: file, local: other })
+          }
+          for (const [path, file] of localMap) {
+            if (!remoteMap.has(path)) onlyLocal.push(file)
+          }
+          setComparing({ onlyRemote, onlyLocal, differing, local, remote })
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const transfer = async (direction) => {
+        if (!comparing) return
+        setBusy(true)
+        setError(null)
+        setDone(null)
+        try {
+          const localPaths = new Set([
+            ...comparing.local.files.map((file) => file.path),
+          ])
+          let count = 0
+          // 手机 -> 电脑：只在手机有的 + 内容不同的（以手机较新为准）
+          if (direction === 'up') {
+            const targets = [
+              ...comparing.onlyLocal,
+              ...comparing.differing.filter((item) => item.local.mtime > item.remote.mtime).map((item) => item.local),
+            ]
+            for (const file of targets) {
+              const data = await callJson('', `/dsh-pair/api/sync-read`, {
+                method: 'POST',
+                body: JSON.stringify({ dir: localDir, path: file.path }),
+              })
+              await callJson(base, `/sync-write`, {
+                method: 'POST',
+                body: JSON.stringify({ dir: remoteDir, path: file.path, base64: data.base64 }),
+              })
+              count += 1
+            }
+          } else {
+            const targets = [
+              ...comparing.onlyRemote,
+              ...comparing.differing.filter((item) => item.remote.mtime > item.local.mtime).map((item) => item.remote),
+            ]
+            for (const file of targets) {
+              const data = await callJson(base, `/sync-read`, {
+                method: 'POST',
+                body: JSON.stringify({ dir: remoteDir, path: file.path }),
+              })
+              await callJson('', `/dsh-pair/api/sync-write`, {
+                method: 'POST',
+                body: JSON.stringify({ dir: localDir, path: file.path, base64: data.base64 }),
+              })
+              count += 1
+            }
+          }
+          setDone(`已传输 ${count} 个文件`)
+          await compare()
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        } finally {
+          setBusy(false)
+        }
+      }
+
+      const diffCount = comparing
+        ? comparing.onlyRemote.length + comparing.onlyLocal.length + comparing.differing.length
+        : 0
+
+      return h('div', { className: 'pair-modal-backdrop', onClick: onClose },
+        h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation() },
+          h('div', { className: 'pair-modal-head' },
+            h('span', { className: 'pair-modal-title' }, '同步工作区'),
+            h('button', { type: 'button', className: 'pair-more', onClick: onClose }, '×')),
+          h('div', { className: 'pair-modal-body', style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+            h('label', { className: 'pair-label' }, '手机上的目录'),
+            h('div', { className: 'pair-field' },
+              h('input', {
+                value: localDir,
+                placeholder: '/storage/emulated/0/... 或 D:\\...',
+                onChange: (e) => setLocalDir(e.target.value),
+              })),
+            h('label', { className: 'pair-label' }, '电脑上的目录'),
+            h('div', { className: 'pair-field' },
+              h('input', {
+                value: remoteDir,
+                placeholder: 'D:\\社科学习',
+                onChange: (e) => setRemoteDir(e.target.value),
+              })),
+            h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+              h(Button, { kind: 'primary', size: 'sm', onClick: compare, disabled: busy || !localDir.trim() || !remoteDir.trim() },
+                busy ? '处理中…' : '比对'),
+              comparing
+                ? h(Button, { kind: 'outline', size: 'sm', onClick: () => transfer('down'), disabled: busy }, '电脑 → 手机')
+                : null,
+              comparing
+                ? h(Button, { kind: 'outline', size: 'sm', onClick: () => transfer('up'), disabled: busy }, '手机 → 电脑')
+                : null),
+            error ? h('div', { className: 'pair-error' }, error) : null,
+            done ? h('div', { className: 'pair-ok' }, done) : null,
+            comparing
+              ? h('div', { className: 'pair-hint' },
+                `只在电脑 ${comparing.onlyRemote.length} · 只在手机 ${comparing.onlyLocal.length} · 内容不同 ${comparing.differing.length}`)
+              : null,
+            comparing && diffCount > 0
+              ? h('div', { style: { maxHeight: 240, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 } },
+                comparing.onlyRemote.slice(0, 40).map((file) => h('div', { key: `r${file.path}`, className: 'pair-hint' }, `+ 电脑  ${file.path}`)),
+                comparing.onlyLocal.slice(0, 40).map((file) => h('div', { key: `l${file.path}`, className: 'pair-hint' }, `+ 手机  ${file.path}`)),
+                comparing.differing.slice(0, 40).map((item) => h('div', { key: `d${item.path}`, className: 'pair-hint' },
+                  `≠ ${item.path}（电脑 ${item.remote.mtime > item.local.mtime ? '较新' : '较旧'}）`)))
+              : null))
+      )
+    }
+
     function MessageBubble({ message, onAnswer, answering, cwd, base }) {
       const [filePreview, setFilePreview] = React.useState(null)
       const role = message.role
@@ -2624,6 +2763,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
       const [q, setQ] = React.useState('')
       const [menuTarget, setMenuTarget] = React.useState(null)
       const [wsMenuTarget, setWsMenuTarget] = React.useState(null)
+      const [showSync, setShowSync] = React.useState(false)
 
       const renameWorkspace = async (workspace) => {
         setWsMenuTarget(null)
@@ -2886,6 +3026,13 @@ body.pair-modal-open .pair-modal { user-select: text; }
         h(Button, {
           kind: 'ghost',
           size: 'sm',
+          onClick: () => setShowSync(true),
+          disabled: !linked,
+          title: '把两边的目录做一次手动同步',
+        }, '同步'),
+        h(Button, {
+          kind: 'ghost',
+          size: 'sm',
           onClick: refreshNow,
           disabled: refreshing,
           title: '刷新（手机端会先同步 GitHub 上的最新地址）',
@@ -3020,8 +3167,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
         h('button', { type: 'button', className: 'pair-menu-item', onClick: () => archiveSession(menuTarget.session) }, '归档会话')))
         : null,
       wsMenuTarget
-        ? h('div', {
-          style: { position: 'fixed', inset: 0, zIndex: 500 },
+        ? h('div', {          style: { position: 'fixed', inset: 0, zIndex: 500 },
           onClick: () => setWsMenuTarget(null),
         },
         h('div', {
@@ -3038,6 +3184,9 @@ body.pair-modal-open .pair-modal { user-select: text; }
         },
         h('button', { type: 'button', className: 'pair-menu-item', onClick: () => renameWorkspace(wsMenuTarget.workspace) }, '重命名'),
         h('button', { type: 'button', className: 'pair-menu-item pair-menu-danger', onClick: () => deleteWorkspace(wsMenuTarget.workspace) }, '删除工作区')))
+        : null,
+      showSync
+        ? h(SyncPanel, { base: apiBase, onClose: () => setShowSync(false) })
         : null)
     }
 

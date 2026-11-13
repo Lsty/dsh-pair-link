@@ -21,7 +21,7 @@ import {
   timingSafeEqual,
   verify,
 } from 'node:crypto'
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { homedir, hostname } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -1127,7 +1127,94 @@ function applySessionApi(ctx, runtime) {
     return { opened: true, path: resolved }
   }
 
-  /** 读一个文本文件给页面预览（限制大小）。 */
+  const SYNC_SKIP_DIRS = new Set(['node_modules', '.git', '.backup', 'dist', 'out', '.cache', '.dsh'])
+const SYNC_MAX_FILES = 4000
+const SYNC_MAX_BYTES = 8 * 1024 * 1024
+
+/** 列一个工作区的文件清单：相对路径 + sha256 + mtime + size。 */
+function syncManifest(rootDir) {
+  const root = String(rootDir ?? '').trim()
+  if (!root) throw new Error('缺少工作区路径')
+  let rootStat
+  try {
+    rootStat = statSync(root)
+  } catch {
+    throw new Error(`工作区不存在：${root}`)
+  }
+  if (!rootStat.isDirectory()) throw new Error('不是目录')
+
+  const files = []
+  let truncated = false
+  const walk = (dir, rel) => {
+    if (truncated) return
+    let entries
+    try {
+      entries = readdirSync(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+    for (const entry of entries) {
+      if (files.length >= SYNC_MAX_FILES) {
+        truncated = true
+        return
+      }
+      const name = entry.name
+      if (entry.isDirectory()) {
+        if (SYNC_SKIP_DIRS.has(name)) continue
+        walk(join(dir, name), rel ? `${rel}/${name}` : name)
+        continue
+      }
+      if (!entry.isFile()) continue
+      const full = join(dir, name)
+      let info
+      try {
+        info = statSync(full)
+      } catch {
+        continue
+      }
+      if (info.size > SYNC_MAX_BYTES) continue
+      let hash = ''
+      try {
+        hash = createHash('sha256').update(readFileSync(full)).digest('hex')
+      } catch {
+        continue
+      }
+      files.push({
+        path: rel ? `${rel}/${name}` : name,
+        size: info.size,
+        mtime: info.mtimeMs,
+        sha256: hash,
+      })
+    }
+  }
+  walk(root, '')
+  return { root, files, truncated }
+}
+
+/** 读工作区内的一个文件（相对路径）。 */
+function syncRead(rootDir, relPath) {
+  const root = String(rootDir ?? '').trim()
+  const rel = String(relPath ?? '').replace(/^[\\/]+/, '').replace(/\.\./g, '')
+  if (!root || !rel) throw new Error('缺少路径')
+  const buf = readFileSync(join(root, rel))
+  if (buf.length > SYNC_MAX_BYTES) throw new Error('文件太大')
+  return { path: rel, base64: buf.toString('base64'), size: buf.length }
+}
+
+/** 写工作区内的一个文件（相对路径，父目录自动创建）。 */
+function syncWrite(rootDir, relPath, base64) {
+  const root = String(rootDir ?? '').trim()
+  const rel = String(relPath ?? '').replace(/^[\\/]+/, '').replace(/\.\./g, '')
+  if (!root || !rel) throw new Error('缺少路径')
+  const buf = Buffer.from(String(base64 ?? ''), 'base64')
+  if (buf.length > SYNC_MAX_BYTES) throw new Error('文件太大')
+  const full = join(root, rel)
+  mkdirSync(dirname(full), { recursive: true })
+  writeFileSync(full, buf)
+  return { path: rel, size: buf.length }
+}
+
+/** 读一个文本文件给页面预览（限制大小）。 */
   function readTextFile(filePath) {
     const resolved = String(filePath ?? '').trim()
     if (!resolved) throw new Error('缺少路径')
@@ -1185,6 +1272,9 @@ function applySessionApi(ctx, runtime) {
     moveSession,
     readTextFile,
     openWithSystem,
+    syncManifest,
+    syncRead,
+    syncWrite,
     readWorkspaceMarks,
     buildTree,
     sessionMeta,
@@ -1280,6 +1370,35 @@ function applyHostRoutes(ctx, runtime, sessions) {
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'search') {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const result = await sessions.searchSessions(url.searchParams.get('q') ?? '')
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'sync') {
+        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
+        const result = sessions.syncManifest(url.searchParams.get('dir') ?? '')
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'sync-read') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = sessions.syncRead(String(body?.dir ?? ''), String(body?.path ?? ''))
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'sync-write') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = sessions.syncWrite(
+          String(body?.dir ?? ''),
+          String(body?.path ?? ''),
+          String(body?.base64 ?? ''),
+        )
         sendJson(res, 200, { ok: true, ...result })
         return
       }
