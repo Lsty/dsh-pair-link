@@ -858,7 +858,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.64'
+    const CLIENT_BUILD = '0.4.65'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -2024,6 +2024,27 @@ body.pair-modal-open .pair-modal { user-select: text; }
       const [manualLocal, setManualLocal] = React.useState(false)
       const [manualRemote, setManualRemote] = React.useState(false)
       const [localDir, setLocalDir] = React.useState('')
+      const [remembered, setRemembered] = React.useState(false)
+      // 上次的配对存在本机，打开面板直接填好
+      React.useEffect(() => {
+        try {
+          const saved = JSON.parse(window.localStorage.getItem('dsh-pair-sync-pair') || 'null')
+          if (saved && saved.local && saved.remote) {
+            setLocalDir(saved.local)
+            setRemoteDir(saved.remote)
+            setRemembered(true)
+          }
+        } catch { /* ignore */ }
+      }, [])
+      const savePair = () => {
+        try {
+          window.localStorage.setItem('dsh-pair-sync-pair', JSON.stringify({
+            local: localDir,
+            remote: remoteDir,
+          }))
+          setRemembered(true)
+        } catch { /* ignore */ }
+      }
       React.useEffect(() => {
         // 本机工作区是异步拿的，回来了才把默认值填上，别覆盖用户已经改过的
         if (localDir) return
@@ -2085,6 +2106,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
             if (!remoteMap.has(path)) onlyLocal.push(file)
           }
           setComparing({ onlyRemote, onlyLocal, differing, local, remote })
+          savePair()
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
         } finally {
