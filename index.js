@@ -911,6 +911,19 @@ function applySessionApi(ctx, runtime) {
   }
 
   /** 工作区树：工作区（按注册顺序）→ 会话列表。 */
+  /** 同步配对：存在插件配置里（localStorage 在手机上会被清）。 */
+  function readSyncPair() {
+    const disk = readDiskConfig()
+    const pair = disk.syncPair
+    if (!pair || typeof pair !== 'object') return { local: '', remote: '' }
+    return { local: String(pair.local ?? ''), remote: String(pair.remote ?? '') }
+  }
+
+  function writeSyncPair(local, remote) {
+    writeDiskConfig({ syncPair: { local: String(local ?? ''), remote: String(remote ?? '') } })
+    return readSyncPair()
+  }
+
   /** 全量工作区（不按「有没有会话」过滤），给同步面板选目录用。 */
   async function listAllWorkspaces() {
     const registry = ctx.get?.('workspaceRegistry')
@@ -1300,6 +1313,8 @@ function syncWrite(rootDir, relPath, base64) {
     renameWorkspace,
     deleteWorkspace,
     listAllWorkspaces,
+    readSyncPair,
+    writeSyncPair,
     createWorkspace,
     moveWorkspace,
     moveSession,
@@ -1475,6 +1490,20 @@ function applyHostRoutes(ctx, runtime, sessions) {
 
       if (req.method === 'POST' && segments.length >= 3 && segments[0] === 'workspaces' && segments[2] === 'delete') {
         const result = await sessions.deleteWorkspace(decodeURIComponent(segments[1]))
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'sync-pair') {
+        sendJson(res, 200, { ok: true, ...sessions.readSyncPair() })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'sync-pair') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = sessions.writeSyncPair(String(body?.local ?? ''), String(body?.remote ?? ''))
         sendJson(res, 200, { ok: true, ...result })
         return
       }
