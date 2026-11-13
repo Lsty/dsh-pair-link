@@ -820,7 +820,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.58'
+    const CLIENT_BUILD = '0.4.59'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1912,9 +1912,11 @@ body.pair-modal-open .pair-modal { user-select: text; }
           : null)
     }
 
-    /** 同步工作区：两边各出一份清单，对比后按方向传差异文件。 */
-    function SyncPanel({ base, onClose }) {
-      const [localDir, setLocalDir] = React.useState('')
+    /** 同步工作区：从两边的工作区列表里选目录，比对后按方向传差异文件。 */
+    function SyncPanel({ base, tree, onClose }) {
+      const workspaces = (tree && Array.isArray(tree.workspaces) ? tree.workspaces : [])
+        .map((workspace) => ({ id: workspace.id, path: workspace.path, title: workspace.title || workspace.path }))
+      const [localDir, setLocalDir] = React.useState(workspaces[0] ? workspaces[0].path : '')
       const [remoteDir, setRemoteDir] = React.useState('')
       const [busy, setBusy] = React.useState(false)
       const [comparing, setComparing] = React.useState(null)
@@ -2012,18 +2014,27 @@ body.pair-modal-open .pair-modal { user-select: text; }
             h('span', { className: 'pair-modal-title' }, '同步工作区'),
             h('button', { type: 'button', className: 'pair-more', onClick: onClose }, '×')),
           h('div', { className: 'pair-modal-body', style: { display: 'flex', flexDirection: 'column', gap: 10 } },
-            h('label', { className: 'pair-label' }, '手机上的目录'),
-            h('div', { className: 'pair-field' },
-              h('input', {
-                value: localDir,
-                placeholder: '/storage/emulated/0/... 或 D:\\...',
-                onChange: (e) => setLocalDir(e.target.value),
-              })),
-            h('label', { className: 'pair-label' }, '电脑上的目录'),
+            h('label', { className: 'pair-label' }, '本机的工作区'),
+            workspaces.length > 0
+              ? h('div', { className: 'pair-field' },
+                h('select', {
+                  value: localDir,
+                  onChange: (e) => setLocalDir(e.target.value),
+                }, workspaces.map((workspace) => h('option', {
+                  key: workspace.id,
+                  value: workspace.path,
+                }, `${workspace.title}（${workspace.path}）`))))
+              : h('div', { className: 'pair-field' },
+                h('input', {
+                  value: localDir,
+                  placeholder: '工作区路径',
+                  onChange: (e) => setLocalDir(e.target.value),
+                })),
+            h('label', { className: 'pair-label' }, '电脑上的工作区'),
             h('div', { className: 'pair-field' },
               h('input', {
                 value: remoteDir,
-                placeholder: 'D:\\社科学习',
+                placeholder: 'D:\\同步工作区',
                 onChange: (e) => setRemoteDir(e.target.value),
               })),
             h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
@@ -3186,7 +3197,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
         h('button', { type: 'button', className: 'pair-menu-item pair-menu-danger', onClick: () => deleteWorkspace(wsMenuTarget.workspace) }, '删除工作区')))
         : null,
       showSync
-        ? h(SyncPanel, { base: apiBase, onClose: () => setShowSync(false) })
+        ? h(SyncPanel, { base: apiBase, tree, onClose: () => setShowSync(false) })
         : null)
     }
 
