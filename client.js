@@ -858,7 +858,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.62'
+    const CLIENT_BUILD = '0.4.63'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -2021,6 +2021,32 @@ body.pair-modal-open .pair-modal { user-select: text; }
       const [error, setError] = React.useState(null)
       const [done, setDone] = React.useState(null)
 
+      const registerLocal = async () => {
+        const target = String(localDir || '').trim()
+        if (!target) return
+        setBusy(true)
+        setError(null)
+        setDone(null)
+        try {
+          await callJson('', '/dsh-pair/api/workspaces', {
+            method: 'POST',
+            body: JSON.stringify({ path: target }),
+          })
+          const data = await callJson('', '/dsh-pair/api/tree')
+          const list = Array.isArray(data.workspaces) ? data.workspaces : []
+          setLocalWorkspaces(list.map((workspace) => ({
+            id: workspace.id,
+            path: workspace.path,
+            title: workspace.title || workspace.path,
+          })))
+          setDone('已注册为工作区，下拉里应该能看到了')
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        } finally {
+          setBusy(false)
+        }
+      }
+
       const compare = async () => {
         setError(null)
         setDone(null)
@@ -2117,33 +2143,30 @@ body.pair-modal-open .pair-modal { user-select: text; }
               ? h('div', { className: 'pair-field' },
                 h('select', {
                   value: localDir,
-                  onChange: (e) => {
-                    if (e.target.value === '__manual__') {
-                      setManualLocal(true)
-                      return
-                    }
-                    setLocalDir(e.target.value)
-                  },
-                },
-                localWorkspaces.map((workspace) => h('option', {
+                  onChange: (e) => setLocalDir(e.target.value),
+                }, localWorkspaces.map((workspace) => h('option', {
                   key: workspace.id,
                   value: workspace.path,
-                }, `${workspace.title}（${workspace.path}）`)),
-                h('option', { value: '__manual__' }, '手动填写路径…')))
+                }, `${workspace.title}（${workspace.path}）`))))
               : h('div', { className: 'pair-field' },
                 h('input', {
                   value: localDir,
                   placeholder: '/storage/Users/currentUser/Documents/同步工作区',
                   onChange: (e) => setLocalDir(e.target.value),
                 })),
-            localWorkspaces.length > 0
-              ? h('button', {
+            h('div', { style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+              localWorkspaces.length > 0
+                ? h('button', {
+                  type: 'button',
+                  className: 'pair-code-btn',
+                  onClick: () => setManualLocal((value) => !value),
+                }, manualLocal ? '从列表选' : '手动填写路径')
+                : null,
+              h('button', {
                 type: 'button',
                 className: 'pair-code-btn',
-                style: { alignSelf: 'flex-start' },
-                onClick: () => setManualLocal((value) => !value),
-              }, manualLocal ? '从列表选' : '手动填写路径')
-              : null,
+                onClick: () => registerLocal(),
+              }, '把这个目录注册为工作区')),
             h('label', { className: 'pair-label' }, '电脑上的工作区'),
             remoteWorkspaces.length > 0 && !manualRemote
               ? h('div', { className: 'pair-field' },
