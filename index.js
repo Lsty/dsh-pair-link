@@ -911,6 +911,24 @@ function applySessionApi(ctx, runtime) {
   }
 
   /** 工作区树：工作区（按注册顺序）→ 会话列表。 */
+  /** 全量工作区（不按「有没有会话」过滤），给同步面板选目录用。 */
+  async function listAllWorkspaces() {
+    const registry = ctx.get?.('workspaceRegistry')
+    if (!registry?.list) return { workspaces: [] }
+    let workspaces = []
+    try {
+      workspaces = registry.list().map((workspace) => ({
+        id: String(workspace.id),
+        title: workspace.title || basenameOf(workspace.path),
+        path: workspace.path,
+        sessionCount: (workspace.sessionIds ?? []).length,
+      }))
+    } catch (err) {
+      ctx.logger?.warn?.('dsh-pair-link: workspaceRegistry.list failed: %s', err?.message ?? err)
+    }
+    return { workspaces }
+  }
+
   async function buildTree(signal) {
     const flat = await listSessions(signal)
     const byId = new Map(flat.map((row) => [row.id, row]))
@@ -1281,6 +1299,7 @@ function syncWrite(rootDir, relPath, base64) {
     pinSession,
     renameWorkspace,
     deleteWorkspace,
+    listAllWorkspaces,
     createWorkspace,
     moveWorkspace,
     moveSession,
@@ -1456,6 +1475,12 @@ function applyHostRoutes(ctx, runtime, sessions) {
 
       if (req.method === 'POST' && segments.length >= 3 && segments[0] === 'workspaces' && segments[2] === 'delete') {
         const result = await sessions.deleteWorkspace(decodeURIComponent(segments[1]))
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'workspaces') {
+        const result = await sessions.listAllWorkspaces()
         sendJson(res, 200, { ok: true, ...result })
         return
       }

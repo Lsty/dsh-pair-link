@@ -858,7 +858,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.63'
+    const CLIENT_BUILD = '0.4.64'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1988,6 +1988,23 @@ body.pair-modal-open .pair-modal { user-select: text; }
       // 远端（电脑）的工作区来自传入的 tree；本机（手机）的单独向本地插件要
       const remoteWorkspaces = (tree && Array.isArray(tree.workspaces) ? tree.workspaces : [])
         .map((workspace) => ({ id: workspace.id, path: workspace.path, title: workspace.title || workspace.path }))
+      const [allRemote, setAllRemote] = React.useState([])
+      React.useEffect(() => {
+        let alive = true
+        callJson(base, '/workspaces')
+          .then((data) => {
+            if (!alive) return
+            const list = Array.isArray(data.workspaces) ? data.workspaces : []
+            setAllRemote(list.map((workspace) => ({
+              id: workspace.id,
+              path: workspace.path,
+              title: workspace.title || workspace.path,
+            })))
+          })
+          .catch(() => { /* 拿不到就退回 tree 里的 */ })
+        return () => { alive = false }
+      }, [base])
+      const remoteOptions = allRemote.length > 0 ? allRemote : remoteWorkspaces
       const [localWorkspaces, setLocalWorkspaces] = React.useState([])
       React.useEffect(() => {
         let alive = true
@@ -2168,14 +2185,14 @@ body.pair-modal-open .pair-modal { user-select: text; }
                 onClick: () => registerLocal(),
               }, '把这个目录注册为工作区')),
             h('label', { className: 'pair-label' }, '电脑上的工作区'),
-            remoteWorkspaces.length > 0 && !manualRemote
+            remoteOptions.length > 0 && !manualRemote
               ? h('div', { className: 'pair-field' },
                 h('select', {
                   value: remoteDir,
                   onChange: (e) => setRemoteDir(e.target.value),
                 },
                 h('option', { value: '' }, '选择电脑上的工作区'),
-                remoteWorkspaces.map((workspace) => h('option', {
+                remoteOptions.map((workspace) => h('option', {
                   key: workspace.id,
                   value: workspace.path,
                 }, `${workspace.title}（${workspace.path}）`)),
