@@ -858,7 +858,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.61'
+    const CLIENT_BUILD = '0.4.62'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1983,15 +1983,38 @@ body.pair-modal-open .pair-modal { user-select: text; }
           : null)
     }
 
-    /** 同步工作区：从两边的工作区列表里选目录，比对后按方向传差异文件。 */
+    /** 同步工作区：两边各选一个目录，比对后按方向传差异文件。 */
     function SyncPanel({ base, tree, onClose }) {
-      const workspaces = (tree && Array.isArray(tree.workspaces) ? tree.workspaces : [])
+      // 远端（电脑）的工作区来自传入的 tree；本机（手机）的单独向本地插件要
+      const remoteWorkspaces = (tree && Array.isArray(tree.workspaces) ? tree.workspaces : [])
         .map((workspace) => ({ id: workspace.id, path: workspace.path, title: workspace.title || workspace.path }))
+      const [localWorkspaces, setLocalWorkspaces] = React.useState([])
+      React.useEffect(() => {
+        let alive = true
+        callJson('', '/dsh-pair/api/tree')
+          .then((data) => {
+            if (!alive) return
+            const list = Array.isArray(data.workspaces) ? data.workspaces : []
+            setLocalWorkspaces(list.map((workspace) => ({
+              id: workspace.id,
+              path: workspace.path,
+              title: workspace.title || workspace.path,
+            })))
+          })
+          .catch(() => { /* 本机拿不到就退回手填 */ })
+        return () => { alive = false }
+      }, [])
       const [manualLocal, setManualLocal] = React.useState(false)
       const [manualRemote, setManualRemote] = React.useState(false)
-      const [localDir, setLocalDir] = React.useState(
-        workspaces[0] ? workspaces[0].path : '/storage/Users/currentUser/Documents/同步工作区',
-      )
+      const [localDir, setLocalDir] = React.useState('')
+      React.useEffect(() => {
+        // 本机工作区是异步拿的，回来了才把默认值填上，别覆盖用户已经改过的
+        if (localDir) return
+        const preferred = localWorkspaces.find((workspace) => /同步工作区$/.test(workspace.path))
+        const pick = preferred || localWorkspaces[0]
+        if (pick) setLocalDir(pick.path)
+        else if (!manualLocal) setLocalDir('/storage/Users/currentUser/Documents/同步工作区')
+      }, [localWorkspaces])
       const [remoteDir, setRemoteDir] = React.useState('')
       const [busy, setBusy] = React.useState(false)
       const [comparing, setComparing] = React.useState(null)
@@ -2090,21 +2113,46 @@ body.pair-modal-open .pair-modal { user-select: text; }
             h('button', { type: 'button', className: 'pair-more', onClick: onClose }, '×')),
           h('div', { className: 'pair-modal-body', style: { display: 'flex', flexDirection: 'column', gap: 10 } },
             h('label', { className: 'pair-label' }, '手机上的目录'),
-            h('div', { className: 'pair-field' },
-              h('input', {
-                value: localDir,
-                placeholder: '/storage/Users/currentUser/Documents/同步工作区',
-                onChange: (e) => setLocalDir(e.target.value),
-              })),
+            localWorkspaces.length > 0 && !manualLocal
+              ? h('div', { className: 'pair-field' },
+                h('select', {
+                  value: localDir,
+                  onChange: (e) => {
+                    if (e.target.value === '__manual__') {
+                      setManualLocal(true)
+                      return
+                    }
+                    setLocalDir(e.target.value)
+                  },
+                },
+                localWorkspaces.map((workspace) => h('option', {
+                  key: workspace.id,
+                  value: workspace.path,
+                }, `${workspace.title}（${workspace.path}）`)),
+                h('option', { value: '__manual__' }, '手动填写路径…')))
+              : h('div', { className: 'pair-field' },
+                h('input', {
+                  value: localDir,
+                  placeholder: '/storage/Users/currentUser/Documents/同步工作区',
+                  onChange: (e) => setLocalDir(e.target.value),
+                })),
+            localWorkspaces.length > 0
+              ? h('button', {
+                type: 'button',
+                className: 'pair-code-btn',
+                style: { alignSelf: 'flex-start' },
+                onClick: () => setManualLocal((value) => !value),
+              }, manualLocal ? '从列表选' : '手动填写路径')
+              : null,
             h('label', { className: 'pair-label' }, '电脑上的工作区'),
-            workspaces.length > 0 && !manualRemote
+            remoteWorkspaces.length > 0 && !manualRemote
               ? h('div', { className: 'pair-field' },
                 h('select', {
                   value: remoteDir,
                   onChange: (e) => setRemoteDir(e.target.value),
                 },
                 h('option', { value: '' }, '选择电脑上的工作区'),
-                workspaces.map((workspace) => h('option', {
+                remoteWorkspaces.map((workspace) => h('option', {
                   key: workspace.id,
                   value: workspace.path,
                 }, `${workspace.title}（${workspace.path}）`)),
