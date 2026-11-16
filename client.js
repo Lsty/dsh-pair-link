@@ -252,6 +252,30 @@ window.__ModuleLoader__.load({
   padding: 4px 0 4px 10px;
   border-left: 2px solid var(--dsw-alias-border-l2);
 }
+.pair-plugin-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 12px;
+  line-height: 20px;
+}
+.pair-plugin-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--dsw-alias-label-dimmed);
+}
+.pair-plugin-dot[data-on="true"] { background: var(--dsw-alias-state-success-primary); }
+.pair-plugin-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dsw-alias-label-primary);
+}
 .pair-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -858,7 +882,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.70'
+    const CLIENT_BUILD = '0.4.71'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1919,6 +1943,63 @@ body.pair-modal-open .pair-modal { user-select: text; }
         }, h('code', null, code)))
     }
 
+    /** 电脑上装了哪些插件：只读列表，点开才拉。 */
+    function PluginCard({ base }) {
+      const [open, setOpen] = React.useState(false)
+      const [busy, setBusy] = React.useState(false)
+      const [items, setItems] = React.useState(null)
+      const [error, setError] = React.useState(null)
+      const load = async () => {
+        setBusy(true)
+        setError(null)
+        try {
+          const data = await callJson(base, '/plugins')
+          setItems(Array.isArray(data.plugins) ? data.plugins : [])
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        } finally {
+          setBusy(false)
+        }
+      }
+      React.useEffect(() => {
+        if (open && items === null && !busy) void load()
+      }, [open])
+      const enabled = items ? items.filter((item) => item.enabled).length : 0
+      return h('div', { className: 'pair-card' },
+        h('button', {
+          type: 'button',
+          className: 'pair-process-toggle',
+          onClick: () => setOpen((value) => !value),
+        },
+        h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›'),
+        h('span', { className: 'pair-process-title' }, '电脑插件'),
+        h('span', { className: 'pair-process-meta' },
+          items ? `${enabled} / ${items.length} 已启用` : '')),
+        open
+          ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 4 } },
+            busy && items === null ? h('div', { className: 'pair-hint' }, '正在读取…') : null,
+            error ? h('div', { className: 'pair-error' }, error) : null,
+            items
+              ? items.map((item) => h('div', {
+                key: item.id || item.name,
+                className: 'pair-plugin-row',
+              },
+              h('span', { className: 'pair-plugin-dot', 'data-on': item.enabled ? 'true' : 'false' }),
+              h('span', { className: 'pair-plugin-name' }, item.title || item.name),
+              h('span', { className: 'pair-hint', style: { flex: '0 0 auto' } }, item.name)))
+              : null,
+            items
+              ? h('button', {
+                type: 'button',
+                className: 'pair-code-btn',
+                style: { alignSelf: 'flex-start' },
+                onClick: load,
+                disabled: busy,
+              }, busy ? '刷新中…' : '重新读取')
+              : null)
+          : null)
+    }
+
     /** 过程分组的图标（对应 DSHM 的 square_stack_3d）。 */
     function ListIcon({ size = 12 }) {
       return h('svg', {
@@ -2968,7 +3049,8 @@ body.pair-modal-open .pair-modal { user-select: text; }
             h('div', { style: { display: 'flex', justifyContent: 'flex-end', flex: '0 0 auto' } },
               h(Button, { kind: 'ghost', size: 'sm', onClick: () => setShowConfig(false) }, '收起')),
             isHost ? null : h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } }),
-            isHost ? h(TunnelCard, { info }) : null)
+            isHost ? h(TunnelCard, { info }) : null,
+        linked ? h(PluginCard, { base: apiBase }) : null)
           : h(React.Fragment, null,
             treeError
               ? h('div', {

@@ -1110,6 +1110,37 @@ function applySessionApi(ctx, runtime) {
     return { deleted: Boolean(result?.deleted) }
   }
 
+  /** 电脑上装了哪些插件（手机端在远程面板里看）。 */
+  async function listPlugins() {
+    const manager = ctx.get?.('pluginManager')
+    if (!manager?.listPlugins) return { plugins: [] }
+    const pick = (value) => {
+      if (!value) return ''
+      if (typeof value === 'string') return value
+      if (typeof value === 'object') return String(value['zh-CN'] ?? value.en ?? '')
+      return ''
+    }
+    let rows = []
+    try {
+      rows = await manager.listPlugins()
+    } catch (err) {
+      ctx.logger?.warn?.('dsh-pair-link: listPlugins failed: %s', err?.message ?? err)
+      return { plugins: [] }
+    }
+    return {
+      plugins: (rows || []).map((row) => ({
+        id: String(row.entryId ?? ''),
+        name: String(row.moduleName ?? ''),
+        title: pick(row.meta?.title) || String(row.moduleName ?? ''),
+        description: pick(row.meta?.description),
+        icon: String(row.meta?.icon ?? ''),
+        enabled: row.enabled === true,
+        phase: row.fiberPhase ?? null,
+        diagnostic: String(row.diagnostic ?? ''),
+      })),
+    }
+  }
+
   /** 用系统默认程序打开一个文件（只在 host 上执行）。 */
   function openWithSystem(filePath) {
     const resolved = String(filePath ?? '').trim()
@@ -1184,6 +1215,7 @@ function applySessionApi(ctx, runtime) {
     moveSession,
     readTextFile,
     openWithSystem,
+    listPlugins,
     readWorkspaceMarks,
     buildTree,
     sessionMeta,
@@ -1308,6 +1340,12 @@ function applyHostRoutes(ctx, runtime, sessions) {
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'tree') {
         const tree = await sessions.buildTree(controller.signal)
         sendJson(res, 200, { ok: true, ...tree, now: Date.now() })
+        return
+      }
+
+      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'plugins') {
+        const result = await sessions.listPlugins()
+        sendJson(res, 200, { ok: true, ...result })
         return
       }
 
