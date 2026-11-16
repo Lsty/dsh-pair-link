@@ -276,6 +276,16 @@ window.__ModuleLoader__.load({
   white-space: nowrap;
   color: var(--dsw-alias-label-primary);
 }
+.pair-plugin-item { display: flex; flex-direction: column; gap: 2px; }
+.pair-plugin-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 2px 0 6px 20px;
+  padding: 6px 8px;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+}
 .pair-menu {
   position: absolute;
   top: calc(100% + 4px);
@@ -917,7 +927,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.75'
+    const CLIENT_BUILD = '0.4.76'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1994,6 +2004,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
       const [items, setItems] = React.useState(null)
       const [error, setError] = React.useState(null)
       const [toggling, setToggling] = React.useState(null)
+      const [opened, setOpened] = React.useState(null)
       const load = async () => {
         setBusy(true)
         setError(null)
@@ -2044,18 +2055,29 @@ body.pair-modal-open .pair-modal { user-select: text; }
               ? h('div', { className: 'pair-hint' }, '这台电脑没有额外安装的插件')
               : null,
             items
-              ? items.map((item) => h('button', {
-                key: item.id || item.name,
-                type: 'button',
-                className: 'pair-plugin-row',
-                disabled: toggling === item.id,
-                onClick: () => void toggle(item),
-                title: item.enabled ? '点击停用' : '点击启用',
-              },
-              h('span', { className: 'pair-plugin-dot', 'data-on': item.enabled ? 'true' : 'false' }),
-              h('span', { className: 'pair-plugin-name' }, item.title || item.name),
-              h('span', { className: 'pair-hint', style: { flex: '0 0 auto' } },
-                toggling === item.id ? '…' : (item.enabled ? '已启用' : '已停用'))))
+              ? items.map((item) => h('div', { key: item.id || item.name, className: 'pair-plugin-item' },
+                h('button', {
+                  type: 'button',
+                  className: 'pair-plugin-row',
+                  onClick: () => setOpened(opened === item.id ? null : item.id),
+                },
+                h('span', { className: 'pair-tool-caret' }, opened === item.id ? '⌄' : '›'),
+                h('span', { className: 'pair-plugin-dot', 'data-on': item.enabled ? 'true' : 'false' }),
+                h('span', { className: 'pair-plugin-name' }, item.title || item.name),
+                h('span', { className: 'pair-hint', style: { flex: '0 0 auto' } },
+                  item.enabled ? '已启用' : '已停用')),
+                opened === item.id
+                  ? h('div', { className: 'pair-plugin-detail' },
+                    h('div', { className: 'pair-hint' }, item.name),
+                    item.description ? h('div', { className: 'pair-hint' }, item.description) : null,
+                    h('div', { style: { display: 'flex', gap: 8, marginTop: 4 } },
+                      h('button', {
+                        type: 'button',
+                        className: 'pair-code-btn',
+                        disabled: toggling === item.id,
+                        onClick: () => void toggle(item),
+                      }, toggling === item.id ? '…' : (item.enabled ? '停用这个插件' : '启用这个插件'))))
+                  : null))
               : null,
             items
               ? h('button', {
