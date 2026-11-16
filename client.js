@@ -917,7 +917,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.74'
+    const CLIENT_BUILD = '0.4.75'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1987,18 +1987,20 @@ body.pair-modal-open .pair-modal { user-select: text; }
         }, h('code', null, code)))
     }
 
-    /** 电脑上装了哪些插件：只读列表，点开才拉。 */
+    /** 电脑上装了哪些插件（只列用户装的，可点开关）。 */
     function PluginCard({ base }) {
       const [open, setOpen] = React.useState(false)
       const [busy, setBusy] = React.useState(false)
       const [items, setItems] = React.useState(null)
       const [error, setError] = React.useState(null)
+      const [toggling, setToggling] = React.useState(null)
       const load = async () => {
         setBusy(true)
         setError(null)
         try {
           const data = await callJson(base, '/plugins')
-          setItems(Array.isArray(data.plugins) ? data.plugins : [])
+          const all = Array.isArray(data.plugins) ? data.plugins : []
+          setItems(all.filter((item) => !item.internal))
         } catch (err) {
           setError(String(err && err.message ? err.message : err))
         } finally {
@@ -2008,6 +2010,21 @@ body.pair-modal-open .pair-modal { user-select: text; }
       React.useEffect(() => {
         if (open && items === null && !busy) void load()
       }, [open])
+      const toggle = async (item) => {
+        setToggling(item.id)
+        setError(null)
+        try {
+          await callJson(base, '/plugins/toggle', {
+            method: 'POST',
+            body: JSON.stringify({ id: item.id, enabled: !item.enabled }),
+          })
+          await load()
+        } catch (err) {
+          setError(String(err && err.message ? err.message : err))
+        } finally {
+          setToggling(null)
+        }
+      }
       const enabled = items ? items.filter((item) => item.enabled).length : 0
       return h('div', { className: 'pair-card' },
         h('button', {
@@ -2018,19 +2035,27 @@ body.pair-modal-open .pair-modal { user-select: text; }
         h('span', { className: 'pair-tool-caret' }, open ? '⌄' : '›'),
         h('span', { className: 'pair-process-title' }, '电脑插件'),
         h('span', { className: 'pair-process-meta' },
-          items ? `${enabled} / ${items.length} 已启用` : '')),
+          items === null ? '' : (items.length === 0 ? '没有额外安装的插件' : `${enabled} / ${items.length} 已启用`))),
         open
           ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 4 } },
             busy && items === null ? h('div', { className: 'pair-hint' }, '正在读取…') : null,
             error ? h('div', { className: 'pair-error' }, error) : null,
+            items && items.length === 0
+              ? h('div', { className: 'pair-hint' }, '这台电脑没有额外安装的插件')
+              : null,
             items
-              ? items.map((item) => h('div', {
+              ? items.map((item) => h('button', {
                 key: item.id || item.name,
+                type: 'button',
                 className: 'pair-plugin-row',
+                disabled: toggling === item.id,
+                onClick: () => void toggle(item),
+                title: item.enabled ? '点击停用' : '点击启用',
               },
               h('span', { className: 'pair-plugin-dot', 'data-on': item.enabled ? 'true' : 'false' }),
               h('span', { className: 'pair-plugin-name' }, item.title || item.name),
-              h('span', { className: 'pair-hint', style: { flex: '0 0 auto' } }, item.name)))
+              h('span', { className: 'pair-hint', style: { flex: '0 0 auto' } },
+                toggling === item.id ? '…' : (item.enabled ? '已启用' : '已停用'))))
               : null,
             items
               ? h('button', {

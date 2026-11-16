@@ -1143,16 +1143,34 @@ function applySessionApi(ctx, runtime) {
       return { plugins: [] }
     }
     return {
-      plugins: (rows || []).map((row) => ({
-        id: String(row.entryId ?? ''),
-        name: String(row.moduleName ?? ''),
-        title: pick(row.meta?.title) || String(row.moduleName ?? ''),
-        description: pick(row.meta?.description),
-        icon: String(row.meta?.icon ?? ''),
-        enabled: row.enabled === true,
-        phase: row.fiberPhase ?? null,
-        diagnostic: String(row.diagnostic ?? ''),
-      })),
+      plugins: (rows || []).map((row) => {
+        const name = String(row.moduleName ?? '')
+        return {
+          id: String(row.entryId ?? ''),
+          name,
+          title: pick(row.meta?.title) || name,
+          description: pick(row.meta?.description),
+          icon: String(row.meta?.icon ?? ''),
+          enabled: row.enabled === true,
+          phase: row.fiberPhase ?? null,
+          diagnostic: String(row.diagnostic ?? ''),
+          // DSH 自带的内部包不展示，只留用户装的插件
+          internal: /^@deepseek-ai\/dsh-/.test(name) || /^cordis:/.test(name),
+        }
+      }),
+    }
+  }
+
+  /** 切换一个插件的启用状态。 */
+  async function setPluginEnabled(entryId, enabled) {
+    const manager = ctx.get?.('pluginManager')
+    if (!manager?.setPluginEnabled) throw new Error('这个 DSH 版本没有开关插件的接口')
+    const id = String(entryId ?? '').trim()
+    if (!id) throw new Error('缺少插件 id')
+    const result = await manager.setPluginEnabled(id, enabled === true)
+    return {
+      changed: Boolean(result?.changed),
+      application: String(result?.application ?? ''),
     }
   }
 
@@ -1232,6 +1250,7 @@ function applySessionApi(ctx, runtime) {
     readTextFile,
     openWithSystem,
     listPlugins,
+    setPluginEnabled,
     readWorkspaceMarks,
     buildTree,
     sessionMeta,
@@ -1361,6 +1380,15 @@ function applyHostRoutes(ctx, runtime, sessions) {
 
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'plugins') {
         const result = await sessions.listPlugins()
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length === 2 && segments[0] === 'plugins' && segments[1] === 'toggle') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = await sessions.setPluginEnabled(String(body?.id ?? ''), body?.enabled === true)
         sendJson(res, 200, { ok: true, ...result })
         return
       }
