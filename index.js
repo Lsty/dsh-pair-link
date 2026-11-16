@@ -1083,11 +1083,47 @@ function applySessionApi(ctx, runtime) {
     return { workspace: result?.workspace ?? null }
   }
 
-  async function deleteWorkspace(workspaceId) {
+  async function moveSession(sessionId, workspaceId, beforeSessionId) {
     const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.moveSession) throw new Error('这个 DSH 版本没有移动会话接口')
+    const result = await workspaces.moveSession({
+      sessionId,
+      workspaceId,
+      ...(beforeSessionId ? { beforeSessionId } : {}),
+    })
+    return { moved: Boolean(result?.moved) }
+  }
+
+  async function moveWorkspace(workspaceId, beforeWorkspaceId) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.move) throw new Error('这个 DSH 版本没有移动工作区接口')
+    const result = await workspaces.move({
+      workspaceId,
+      ...(beforeWorkspaceId ? { beforeWorkspaceId } : {}),
+    })
+    return { moved: Boolean(result?.moved) }
+  }
+
+  async function deleteWorkspace(workspaceId) {    const workspaces = ctx.get?.('workspaceController')
     if (!workspaces?.delete) throw new Error('这个 DSH 版本没有删除工作区接口')
     const result = await workspaces.delete({ workspaceId })
     return { deleted: Boolean(result?.deleted) }
+  }
+
+  /** 用系统默认程序打开一个文件（只在 host 上执行）。 */
+  function openWithSystem(filePath) {
+    const resolved = String(filePath ?? '').trim()
+    if (!resolved) throw new Error('缺少路径')
+    let exists = false
+    try { exists = existsSync(resolved) } catch { exists = false }
+    if (!exists) throw new Error('文件不存在')
+    const child = spawn('cmd', ['/c', 'start', '', resolved], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    })
+    child.unref?.()
+    return { opened: true, path: resolved }
   }
 
   /** 读一个文本文件给页面预览（限制大小）。 */
