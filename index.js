@@ -1128,50 +1128,62 @@ function applySessionApi(ctx, runtime) {
   /** 电脑上装了哪些插件（手机端在远程面板里看）。 */
   async function listPlugins() {
     const manager = ctx.get?.('pluginManager')
-    if (!manager?.listPlugins) return { plugins: [] }
+    if (!manager) return { plugins: [] }
     const pick = (value) => {
       if (!value) return ''
       if (typeof value === 'string') return value
       if (typeof value === 'object') return String(value['zh-CN'] ?? value.en ?? '')
       return ''
     }
-    let rows = []
-    try {
-      rows = await manager.listPlugins()
-    } catch (err) {
-      ctx.logger?.warn?.('dsh-pair-link: listPlugins failed: %s', err?.message ?? err)
-      return { plugins: [] }
+    // 设置页「插件」看的是 bundle（安装的包），不是运行时条目
+    if (manager.listBundles) {
+      let bundles = []
+      try {
+        bundles = await manager.listBundles()
+      } catch (err) {
+        ctx.logger?.warn?.('dsh-pair-link: listBundles failed: %s', err?.message ?? err)
+        bundles = []
+      }
+      const rows = (bundles || []).filter((bundle) => bundle && bundle.installed !== false)
+      return {
+        plugins: rows.map((bundle) => ({
+          id: String(bundle.name ?? ''),
+          name: String(bundle.name ?? ''),
+          title: pick(bundle.meta?.title) || String(bundle.name ?? ''),
+          description: pick(bundle.meta?.description) || String(bundle.description ?? ''),
+          version: String(bundle.version ?? ''),
+          enabled: bundle.enabled === true,
+          installed: bundle.installed === true,
+          official: bundle.official === true,
+          bundle: true,
+          internal: false,
+        })),
+      }
     }
-    return {
-      plugins: (rows || []).map((row) => {
-        const name = String(row.moduleName ?? '')
-        return {
-          id: String(row.entryId ?? ''),
-          name,
-          title: pick(row.meta?.title) || name,
-          description: pick(row.meta?.description),
-          icon: String(row.meta?.icon ?? ''),
-          enabled: row.enabled === true,
-          phase: row.fiberPhase ?? null,
-          diagnostic: String(row.diagnostic ?? ''),
-          // DSH 自带的内部包不展示，只留用户装的插件
-          internal: /^@deepseek-ai\/dsh-/.test(name) || /^cordis:/.test(name),
-        }
-      }),
-    }
+    return { plugins: [] }
   }
 
   /** 切换一个插件的启用状态。 */
   async function setPluginEnabled(entryId, enabled) {
     const manager = ctx.get?.('pluginManager')
-    if (!manager?.setPluginEnabled) throw new Error('这个 DSH 版本没有开关插件的接口')
+    if (!manager) throw new Error('这个 DSH 版本没有开关插件的接口')
     const id = String(entryId ?? '').trim()
-    if (!id) throw new Error('缺少插件 id')
-    const result = await manager.setPluginEnabled(id, enabled === true)
-    return {
-      changed: Boolean(result?.changed),
-      application: String(result?.application ?? ''),
+    if (!id) throw new Error('缺少插件名')
+    if (manager.setBundleEnabled) {
+      const result = await manager.setBundleEnabled(id, enabled === true)
+      return {
+        changed: Boolean(result?.changed),
+        application: String(result?.application ?? ''),
+      }
     }
+    if (manager.setPluginEnabled) {
+      const result = await manager.setPluginEnabled(id, enabled === true)
+      return {
+        changed: Boolean(result?.changed),
+        application: String(result?.application ?? ''),
+      }
+    }
+    throw new Error('这个 DSH 版本没有开关插件的接口')
   }
 
   /** 用系统默认程序打开一个文件（只在 host 上执行）。 */

@@ -927,7 +927,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.76'
+    const CLIENT_BUILD = '0.4.77'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -2065,7 +2065,8 @@ body.pair-modal-open .pair-modal { user-select: text; }
                 h('span', { className: 'pair-plugin-dot', 'data-on': item.enabled ? 'true' : 'false' }),
                 h('span', { className: 'pair-plugin-name' }, item.title || item.name),
                 h('span', { className: 'pair-hint', style: { flex: '0 0 auto' } },
-                  item.enabled ? '已启用' : '已停用')),
+                  item.version ? `v${item.version}` : '',
+                  item.enabled ? ' · 已启用' : ' · 已停用')),
                 opened === item.id
                   ? h('div', { className: 'pair-plugin-detail' },
                     h('div', { className: 'pair-hint' }, item.name),
