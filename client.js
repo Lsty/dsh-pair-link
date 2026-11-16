@@ -901,7 +901,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.72'
+    const CLIENT_BUILD = '0.4.73'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1315,7 +1315,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
         return haystack.includes(query)
       }
 
-      const group = (key, label, sessions, collapsible, collapsedNow, toggle, workspaceId) => {
+      const group = (key, label, sessions, collapsible, collapsedNow, toggle, workspaceId, workspacePath) => {
         const visible = sessions.filter(matches)
         if (!visible.length && query) return null
         if (!visible.length && !collapsible) return null
@@ -1336,7 +1336,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
                   type: 'button',
                   className: 'pair-ws-add',
                   title: '在这个工作区新建会话',
-                  onClick: () => onCreate(workspaceId),
+                  onClick: () => onCreate(workspaceId, workspacePath),
                 }, '＋')
                 : null,
               workspaceId && onWorkspaceMenu
@@ -1389,6 +1389,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
           collapsed.has(workspace.id),
           () => onToggle(workspace.id),
           workspace.id,
+          workspace.path,
         )),
         group(
           '__others__',
@@ -2857,11 +2858,12 @@ body.pair-modal-open .pair-modal { user-select: text; }
         }
       }
 
-      const createIn = async (workspaceId) => {
+      const createIn = async (workspaceId, workspacePath) => {
         try {
-          const body = await callJson('', '/dsh-pair/api/sessions', {
+          // 走电脑：create 认 cwd（目录），不认工作区 id
+          const body = await callJson(apiBase, '/sessions', {
             method: 'POST',
-            body: JSON.stringify({ workspaceId }),
+            body: JSON.stringify({ cwd: workspacePath || '' }),
           })
           await loadTree()
           if (body && body.sessionId) setActiveId(body.sessionId)

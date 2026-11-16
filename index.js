@@ -1037,10 +1037,12 @@ function applySessionApi(ctx, runtime) {
     }
   }
 
-  async function createSession(workspaceId) {
+  async function createSession(workspacePath) {
     const controller = controllerOf()
     if (!controller?.create) throw new Error('这个 DSH 版本没有新建会话接口')
-    const result = await controller.create({ ...(workspaceId ? { workspaceId } : {}) })
+    // create 认的是目录（cwd），不是工作区注册表里的 id
+    const cwd = String(workspacePath ?? '').trim()
+    const result = await controller.create(cwd ? { cwd } : {})
     return { sessionId: result?.sessionId ?? null }
   }
 
@@ -1317,7 +1319,7 @@ function applyHostRoutes(ctx, runtime, sessions) {
         const raw = await readBody(req)
         let body
         try { body = JSON.parse(raw || '{}') } catch { body = {} }
-        const result = await sessions.createSession(body?.workspaceId ? String(body.workspaceId) : '')
+        const result = await sessions.createSession(String(body?.cwd ?? body?.workspaceId ?? ''))
         sendJson(res, 200, { ok: true, ...result })
         return
       }
