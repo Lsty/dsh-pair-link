@@ -551,9 +551,25 @@ body.pair-modal-open .pair-modal { user-select: text; }
 }
 
 .pair-tree { display: flex; flex-direction: column; gap: 2px; overflow-y: auto; overflow-x: hidden; flex: 1; min-height: 120px; padding-right: 2px; box-sizing: border-box; width: 100%; }
-.pair-search { position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; background: var(--dsw-alias-bg-layer-1); }
+.pair-search { position: sticky; top: 0; z-index: 2; padding: 2px 0 6px; background: var(--dsw-alias-bg-layer-1); display: flex; gap: 6px; align-items: center; }
+.pair-ws-add-inline {
+  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: var(--dsw-alias-bg-layer-2);
+  color: var(--dsw-alias-label-secondary);
+  font-family: inherit;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pair-ws-add-inline:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .pair-search input {
   width: 100%;
+  flex: 1;
+  min-width: 0;
   height: 36px;
   padding: 0 10px;
   box-sizing: border-box;
@@ -901,7 +917,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.73'
+    const CLIENT_BUILD = '0.4.74'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1373,14 +1389,15 @@ body.pair-modal-open .pair-modal { user-select: text; }
             value: q || '',
             placeholder: '搜索会话标题 / 路径',
             onChange: (e) => onQuery(e.target.value),
-          })),
-        onAddWorkspace
-          ? h('button', {
-            type: 'button',
-            className: 'pair-ws-add-row',
-            onClick: onAddWorkspace,
-          }, '＋ 添加工作区')
-          : null,
+          }),
+          onAddWorkspace
+            ? h('button', {
+              type: 'button',
+              className: 'pair-ws-add-inline',
+              title: '添加工作区',
+              onClick: onAddWorkspace,
+            }, '＋')
+            : null),
         workspaces.map((workspace) => group(
           workspace.id,
           workspace.title || basename(workspace.path),
@@ -3101,8 +3118,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
             h('div', { style: { display: 'flex', justifyContent: 'flex-end', flex: '0 0 auto' } },
               h(Button, { kind: 'ghost', size: 'sm', onClick: () => setShowConfig(false) }, '收起')),
             isHost ? null : h(ConfigForm, { info, onSaved: () => { setShowConfig(false); refreshNow() } }),
-            isHost ? h(TunnelCard, { info }) : null,
-        linked ? h(PluginCard, { base: apiBase }) : null)
+            isHost ? h(TunnelCard, { info }) : null)
           : h(React.Fragment, null,
             treeError
               ? h('div', {
@@ -3190,6 +3206,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
       header,
       infoError ? h('div', { className: 'pair-error' }, `配对信息读取失败：${infoError}`) : null,
       isHost ? null : h(UpdateBar),
+      linked ? h(PluginCard, { base: apiBase }) : null,
       h('div', { className: 'pair-panes' },
         (narrow && activeId) ? null : treePane,
         (narrow && !activeId) ? null : detailPane),
