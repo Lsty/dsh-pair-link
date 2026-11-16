@@ -1110,6 +1110,19 @@ function applySessionApi(ctx, runtime) {
     return { deleted: Boolean(result?.deleted) }
   }
 
+  /** 把一个已存在的目录注册成原生工作区（出现在侧栏工作区列表里）。 */
+  async function createWorkspace(dirPath) {
+    const workspaces = ctx.get?.('workspaceController')
+    if (!workspaces?.create) throw new Error('这个 DSH 版本没有新建工作区接口')
+    const resolved = String(dirPath ?? '').trim()
+    if (!resolved) throw new Error('缺少目录路径')
+    let exists = false
+    try { exists = existsSync(resolved) } catch { exists = false }
+    if (!exists) throw new Error(`目录不存在：${resolved}`)
+    const result = await workspaces.create({ path: resolved })
+    return { workspace: result?.workspace ?? null, created: Boolean(result?.created) }
+  }
+
   /** 电脑上装了哪些插件（手机端在远程面板里看）。 */
   async function listPlugins() {
     const manager = ctx.get?.('pluginManager')
@@ -1213,6 +1226,7 @@ function applySessionApi(ctx, runtime) {
     deleteWorkspace,
     moveWorkspace,
     moveSession,
+    createWorkspace,
     readTextFile,
     openWithSystem,
     listPlugins,
@@ -1345,6 +1359,15 @@ function applyHostRoutes(ctx, runtime, sessions) {
 
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'plugins') {
         const result = await sessions.listPlugins()
+        sendJson(res, 200, { ok: true, ...result })
+        return
+      }
+
+      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'workspaces') {
+        const raw = await readBody(req)
+        let body
+        try { body = JSON.parse(raw || '{}') } catch { body = {} }
+        const result = await sessions.createWorkspace(String(body?.path ?? ''))
         sendJson(res, 200, { ok: true, ...result })
         return
       }

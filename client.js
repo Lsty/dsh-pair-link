@@ -581,6 +581,25 @@ body.pair-modal-open .pair-modal { user-select: text; }
   color: inherit;
   text-align: left;
 }
+.pair-ws-add-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 32px;
+  margin-bottom: 4px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--dsw-radius-md);
+  background: transparent;
+  color: var(--dsw-alias-label-tertiary);
+  font-family: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.pair-ws-add-row:hover { background: var(--dsw-alias-interactive-bg-hover); color: var(--dsw-alias-label-primary); }
 .pair-ws-add {
   border: none;
   background: transparent;
@@ -882,7 +901,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
     // 基础
     // -----------------------------------------------------------------------
     // 页面（client.js）自身的构建版本，和 package.json 一起由发版脚本同步。
-    const CLIENT_BUILD = '0.4.71'
+    const CLIENT_BUILD = '0.4.72'
 
     function pageToken() {
       return typeof window !== 'undefined' && typeof window.__DSH_PAIR_TOKEN__ === 'string'
@@ -1285,7 +1304,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
       active ? h('span', { style: { color: 'var(--dsw-alias-state-business-primary)', fontSize: 13 } }, '•') : null)
     }
 
-    function WorkspaceTree({ tree, activeId, onOpen, collapsed, onToggle, q, onQuery, onCreate, onMenu, onWorkspaceMenu }) {
+    function WorkspaceTree({ tree, activeId, onOpen, collapsed, onToggle, q, onQuery, onCreate, onMenu, onWorkspaceMenu, onAddWorkspace }) {
       if (!tree) return h(Empty, null, '正在读取工作区…')
       const workspaces = tree.workspaces || []
       const others = tree.others || []
@@ -1355,6 +1374,13 @@ body.pair-modal-open .pair-modal { user-select: text; }
             placeholder: '搜索会话标题 / 路径',
             onChange: (e) => onQuery(e.target.value),
           })),
+        onAddWorkspace
+          ? h('button', {
+            type: 'button',
+            className: 'pair-ws-add-row',
+            onClick: onAddWorkspace,
+          }, '＋ 添加工作区')
+          : null,
         workspaces.map((workspace) => group(
           workspace.id,
           workspace.title || basename(workspace.path),
@@ -2776,6 +2802,30 @@ body.pair-modal-open .pair-modal { user-select: text; }
       const [q, setQ] = React.useState('')
       const [menuTarget, setMenuTarget] = React.useState(null)
       const [wsMenuTarget, setWsMenuTarget] = React.useState(null)
+      const [addWsOpen, setAddWsOpen] = React.useState(false)
+      const [addWsPath, setAddWsPath] = React.useState('')
+      const [addWsBusy, setAddWsBusy] = React.useState(false)
+      const [addWsError, setAddWsError] = React.useState(null)
+
+      const submitAddWorkspace = async () => {
+        const target = String(addWsPath || '').trim()
+        if (!target) return
+        setAddWsBusy(true)
+        setAddWsError(null)
+        try {
+          await callJson(apiBase, '/workspaces', {
+            method: 'POST',
+            body: JSON.stringify({ path: target }),
+          })
+          setAddWsOpen(false)
+          setAddWsPath('')
+          await refreshNow()
+        } catch (err) {
+          setAddWsError(String(err && err.message ? err.message : err))
+        } finally {
+          setAddWsBusy(false)
+        }
+      }
 
       const renameWorkspace = async (workspace) => {
         setWsMenuTarget(null)
@@ -3090,6 +3140,7 @@ body.pair-modal-open .pair-modal { user-select: text; }
               q,
               onQuery: setQ,
               onCreate: createIn,
+              onAddWorkspace: () => setAddWsOpen(true),
               onMenu: (session, rect) => setMenuTarget({
                 session,
                 left: Math.max(8, Math.min(rect.right - 160, window.innerWidth - 172)),
@@ -3190,6 +3241,29 @@ body.pair-modal-open .pair-modal { user-select: text; }
         },
         h('button', { type: 'button', className: 'pair-menu-item', onClick: () => renameWorkspace(wsMenuTarget.workspace) }, '重命名'),
         h('button', { type: 'button', className: 'pair-menu-item pair-menu-danger', onClick: () => deleteWorkspace(wsMenuTarget.workspace) }, '删除工作区')))
+        : null,
+      addWsOpen
+        ? h('div', { className: 'pair-modal-backdrop', onClick: () => { if (!addWsBusy) setAddWsOpen(false) } },
+          h('div', { className: 'pair-modal', onClick: (e) => e.stopPropagation(), style: { maxWidth: 420 } },
+            h('div', { className: 'pair-modal-head' },
+              h('span', { className: 'pair-modal-title' }, '添加工作区'),
+              h('button', { type: 'button', className: 'pair-more', onClick: () => setAddWsOpen(false) }, '×')),
+            h('div', { className: 'pair-modal-body', style: { display: 'flex', flexDirection: 'column', gap: 10 } },
+              h('label', { className: 'pair-label' }, '目录的绝对路径'),
+              h('div', { className: 'pair-field' },
+                h('input', {
+                  value: addWsPath,
+                  placeholder: isHost ? 'D:\\某个目录' : '/storage/Users/currentUser/Documents/某个目录',
+                  onChange: (e) => setAddWsPath(e.target.value),
+                  autoFocus: true,
+                })),
+              h('div', { className: 'pair-hint' },
+                isHost ? '目录必须已经存在' : '填的是电脑上的目录，会注册到电脑的工作区列表'),
+              addWsError ? h('div', { className: 'pair-error' }, addWsError) : null,
+              h('div', { style: { display: 'flex', gap: 8 } },
+                h(Button, { kind: 'primary', size: 'sm', onClick: submitAddWorkspace, disabled: addWsBusy || !addWsPath.trim() },
+                  addWsBusy ? '添加中…' : '添加'),
+                h(Button, { kind: 'outline', size: 'sm', onClick: () => setAddWsOpen(false), disabled: addWsBusy }, '取消')))))
         : null)
     }
 
