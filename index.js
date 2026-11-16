@@ -911,101 +911,7 @@ function applySessionApi(ctx, runtime) {
   }
 
   /** 工作区树：工作区（按注册顺序）→ 会话列表。 */
-  /** 同步配对：存在插件配置里（localStorage 在手机上会被清）。 */
-  function readSyncPair() {
-    const disk = readDiskConfig()
-    const pair = disk.syncPair
-    if (!pair || typeof pair !== 'object') return { local: '', remote: '' }
-    return { local: String(pair.local ?? ''), remote: String(pair.remote ?? '') }
-  }
-
-  function writeSyncPair(local, remote) {
-    writeDiskConfig({ syncPair: { local: String(local ?? ''), remote: String(remote ?? '') } })
-    return readSyncPair()
-  }
-
-  /** 启动后自动同步一次：本机 ↔ 对端，较新的覆盖较旧的。 */
-  async function autoSyncOnce() {
-    const pair = readSyncPair()
-    if (!pair.local || !pair.remote) return { ok: false, reason: '没有配置同步配对' }
-    const remote = runtime.remote
-    if (!remote || !remote.httpOrigin) return { ok: false, reason: '没有配对地址' }
-    const headers = { 'x-pair-token': runtime.secret, 'content-type': 'application/json' }
-    let local
-    try {
-      local = syncManifest(pair.local)
-    } catch (err) {
-      return { ok: false, reason: `本机清单失败：${err?.message ?? err}` }
-    }
-    let remoteData
-    try {
-      const res = await fetch(
-        `${remote.httpOrigin}/dsh-pair/api/sync?dir=${encodeURIComponent(pair.remote)}`,
-        { headers },
-      )
-      if (!res.ok) return { ok: false, reason: `对端返回 ${res.status}` }
-      remoteData = await res.json()
-    } catch (err) {
-      return { ok: false, reason: `连不上对端：${err?.message ?? err}` }
-    }
-    const remoteFiles = Array.isArray(remoteData.files) ? remoteData.files : []
-    const remoteMap = new Map(remoteFiles.map((file) => [file.path, file]))
-    const localMap = new Map(local.files.map((file) => [file.path, file]))
-    let pushed = 0
-    let pulled = 0
-    for (const [path, file] of localMap) {
-      const other = remoteMap.get(path)
-      if (other && other.sha256 === file.sha256) continue
-      if (other && other.mtime >= file.mtime) continue
-      try {
-        const data = syncRead(pair.local, path)
-        const res = await fetch(`${remote.httpOrigin}/dsh-pair/api/sync-write`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ dir: pair.remote, path, base64: data.base64 }),
-        })
-        if (res.ok) pushed += 1
-      } catch { /* 单个文件失败不影响其它 */ }
-    }
-    for (const [path, file] of remoteMap) {
-      const other = localMap.get(path)
-      if (other && other.sha256 === file.sha256) continue
-      if (other && other.mtime > file.mtime) continue
-      try {
-        const res = await fetch(`${remote.httpOrigin}/dsh-pair/api/sync-read`, {
-          method: 'POST',
-          headers,
-          body: JSON.stringify({ dir: pair.remote, path }),
-        })
-        if (!res.ok) continue
-        const data = await res.json()
-        syncWrite(pair.local, path, data.base64)
-        pulled += 1
-      } catch { /* 同上 */ }
-    }
-    ctx.logger?.info?.('dsh-pair-link: 自动同步完成，推送 %d 个、拉取 %d 个', pushed, pulled)
-    return { ok: true, pushed, pulled, pair }
-  }
-
-  /** 全量工作区（不按「有没有会话」过滤），给同步面板选目录用。 */
-  async function listAllWorkspaces() {
-    const registry = ctx.get?.('workspaceRegistry')
-    if (!registry?.list) return { workspaces: [] }
-    let workspaces = []
-    try {
-      workspaces = registry.list().map((workspace) => ({
-        id: String(workspace.id),
-        title: workspace.title || basenameOf(workspace.path),
-        path: workspace.path,
-        sessionCount: (workspace.sessionIds ?? []).length,
-      }))
-    } catch (err) {
-      ctx.logger?.warn?.('dsh-pair-link: workspaceRegistry.list failed: %s', err?.message ?? err)
-    }
-    return { workspaces }
-  }
-
-  async function buildTree(signal) {
+      async function buildTree(signal) {
     const flat = await listSessions(signal)
     const byId = new Map(flat.map((row) => [row.id, row]))
     const registry = ctx.get?.('workspaceRegistry')
@@ -1184,144 +1090,7 @@ function applySessionApi(ctx, runtime) {
     return { deleted: Boolean(result?.deleted) }
   }
 
-  /** 把一个已存在的目录注册成原生工作区（会出现在左侧栏工作区列表里）。 */
-  async function createWorkspace(dirPath) {
-    const workspaces = ctx.get?.('workspaceController')
-    if (!workspaces?.create) throw new Error('这个 DSH 版本没有新建工作区接口')
-    const resolved = String(dirPath ?? '').trim()
-    if (!resolved) throw new Error('缺少目录路径')
-    let exists = false
-    try { exists = existsSync(resolved) } catch { exists = false }
-    if (!exists) throw new Error(`目录不存在：${resolved}`)
-    const result = await workspaces.create({ path: resolved })
-    return { workspace: result?.workspace ?? null, created: Boolean(result?.created) }
-  }
-
-  async function moveWorkspace(workspaceId, beforeWorkspaceId) {
-    const workspaces = ctx.get?.('workspaceController')
-    if (!workspaces?.insertBefore) throw new Error('这个 DSH 版本没有工作区排序接口')
-    const result = await workspaces.insertBefore({
-      workspaceId,
-      ...(beforeWorkspaceId ? { beforeWorkspaceId } : {}),
-    })
-    return { workspaceIds: result?.workspaceIds ?? [] }
-  }
-
-  async function moveSession(workspaceId, sessionId, beforeSessionId) {
-    const workspaces = ctx.get?.('workspaceController')
-    if (!workspaces?.insertSessionBefore) throw new Error('这个 DSH 版本没有会话排序接口')
-    const result = await workspaces.insertSessionBefore({
-      workspaceId,
-      sessionId,
-      ...(beforeSessionId ? { beforeSessionId } : {}),
-    })
-    return { ok: true }
-  }
-
-  /** 用系统默认程序打开一个文件（只在 host 上执行）。 */
-  function openWithSystem(filePath) {
-    const resolved = String(filePath ?? '').trim()
-    if (!resolved) throw new Error('缺少路径')
-    let exists = false
-    try { exists = existsSync(resolved) } catch { exists = false }
-    if (!exists) throw new Error('文件不存在')
-    const child = spawn('cmd', ['/c', 'start', '', resolved], {
-      detached: true,
-      stdio: 'ignore',
-      windowsHide: true,
-    })
-    child.unref?.()
-    return { opened: true, path: resolved }
-  }
-
-  const SYNC_SKIP_DIRS = new Set(['node_modules', '.git', '.backup', 'dist', 'out', '.cache', '.dsh'])
-const SYNC_MAX_FILES = 4000
-const SYNC_MAX_BYTES = 8 * 1024 * 1024
-
-/** 列一个工作区的文件清单：相对路径 + sha256 + mtime + size。 */
-function syncManifest(rootDir) {
-  const root = String(rootDir ?? '').trim()
-  if (!root) throw new Error('缺少工作区路径')
-  let rootStat
-  try {
-    rootStat = statSync(root)
-  } catch {
-    throw new Error(`工作区不存在：${root}`)
-  }
-  if (!rootStat.isDirectory()) throw new Error('不是目录')
-
-  const files = []
-  let truncated = false
-  const walk = (dir, rel) => {
-    if (truncated) return
-    let entries
-    try {
-      entries = readdirSync(dir, { withFileTypes: true })
-    } catch {
-      return
-    }
-    for (const entry of entries) {
-      if (files.length >= SYNC_MAX_FILES) {
-        truncated = true
-        return
-      }
-      const name = entry.name
-      if (entry.isDirectory()) {
-        if (SYNC_SKIP_DIRS.has(name)) continue
-        walk(join(dir, name), rel ? `${rel}/${name}` : name)
-        continue
-      }
-      if (!entry.isFile()) continue
-      const full = join(dir, name)
-      let info
-      try {
-        info = statSync(full)
-      } catch {
-        continue
-      }
-      if (info.size > SYNC_MAX_BYTES) continue
-      let hash = ''
-      try {
-        hash = createHash('sha256').update(readFileSync(full)).digest('hex')
-      } catch {
-        continue
-      }
-      files.push({
-        path: rel ? `${rel}/${name}` : name,
-        size: info.size,
-        mtime: info.mtimeMs,
-        sha256: hash,
-      })
-    }
-  }
-  walk(root, '')
-  return { root, files, truncated }
-}
-
-/** 读工作区内的一个文件（相对路径）。 */
-function syncRead(rootDir, relPath) {
-  const root = String(rootDir ?? '').trim()
-  const rel = String(relPath ?? '').replace(/^[\\/]+/, '').replace(/\.\./g, '')
-  if (!root || !rel) throw new Error('缺少路径')
-  const buf = readFileSync(join(root, rel))
-  if (buf.length > SYNC_MAX_BYTES) throw new Error('文件太大')
-  return { path: rel, base64: buf.toString('base64'), size: buf.length }
-}
-
-/** 写工作区内的一个文件（相对路径，父目录自动创建）。 */
-function syncWrite(rootDir, relPath, base64) {
-  const root = String(rootDir ?? '').trim()
-  const rel = String(relPath ?? '').replace(/^[\\/]+/, '').replace(/\.\./g, '')
-  if (!root || !rel) throw new Error('缺少路径')
-  const buf = Buffer.from(String(base64 ?? ''), 'base64')
-  if (buf.length > SYNC_MAX_BYTES) throw new Error('文件太大')
-  const full = join(root, rel)
-  mkdirSync(dirname(full), { recursive: true })
-  writeFileSync(full, buf)
-  return { path: rel, size: buf.length }
-}
-
-/** 读一个文本文件给页面预览（限制大小）。 */
+  /** 读一个文本文件给页面预览（限制大小）。 */
   function readTextFile(filePath) {
     const resolved = String(filePath ?? '').trim()
     if (!resolved) throw new Error('缺少路径')
@@ -1375,18 +1144,10 @@ function syncWrite(rootDir, relPath, base64) {
     pinSession,
     renameWorkspace,
     deleteWorkspace,
-    listAllWorkspaces,
-    readSyncPair,
-    writeSyncPair,
-    autoSyncOnce,
-    createWorkspace,
     moveWorkspace,
     moveSession,
     readTextFile,
     openWithSystem,
-    syncManifest,
-    syncRead,
-    syncWrite,
     readWorkspaceMarks,
     buildTree,
     sessionMeta,
@@ -1486,35 +1247,6 @@ function applyHostRoutes(ctx, runtime, sessions) {
         return
       }
 
-      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'sync') {
-        const url = new URL(req.url ?? '/', 'http://127.0.0.1')
-        const result = sessions.syncManifest(url.searchParams.get('dir') ?? '')
-        sendJson(res, 200, { ok: true, ...result })
-        return
-      }
-
-      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'sync-read') {
-        const raw = await readBody(req)
-        let body
-        try { body = JSON.parse(raw || '{}') } catch { body = {} }
-        const result = sessions.syncRead(String(body?.dir ?? ''), String(body?.path ?? ''))
-        sendJson(res, 200, { ok: true, ...result })
-        return
-      }
-
-      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'sync-write') {
-        const raw = await readBody(req)
-        let body
-        try { body = JSON.parse(raw || '{}') } catch { body = {} }
-        const result = sessions.syncWrite(
-          String(body?.dir ?? ''),
-          String(body?.path ?? ''),
-          String(body?.base64 ?? ''),
-        )
-        sendJson(res, 200, { ok: true, ...result })
-        return
-      }
-
       if (req.method === 'GET' && segments.length === 1 && segments[0] === 'file') {
         const url = new URL(req.url ?? '/', 'http://127.0.0.1')
         const result = sessions.readTextFile(url.searchParams.get('path') ?? '')
@@ -1554,35 +1286,6 @@ function applyHostRoutes(ctx, runtime, sessions) {
 
       if (req.method === 'POST' && segments.length >= 3 && segments[0] === 'workspaces' && segments[2] === 'delete') {
         const result = await sessions.deleteWorkspace(decodeURIComponent(segments[1]))
-        sendJson(res, 200, { ok: true, ...result })
-        return
-      }
-
-      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'sync-pair') {
-        sendJson(res, 200, { ok: true, ...sessions.readSyncPair() })
-        return
-      }
-
-      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'sync-pair') {
-        const raw = await readBody(req)
-        let body
-        try { body = JSON.parse(raw || '{}') } catch { body = {} }
-        const result = sessions.writeSyncPair(String(body?.local ?? ''), String(body?.remote ?? ''))
-        sendJson(res, 200, { ok: true, ...result })
-        return
-      }
-
-      if (req.method === 'GET' && segments.length === 1 && segments[0] === 'workspaces') {
-        const result = await sessions.listAllWorkspaces()
-        sendJson(res, 200, { ok: true, ...result })
-        return
-      }
-
-      if (req.method === 'POST' && segments.length === 1 && segments[0] === 'workspaces') {
-        const raw = await readBody(req)
-        let body
-        try { body = JSON.parse(raw || '{}') } catch { body = {} }
-        const result = await sessions.createWorkspace(String(body?.path ?? ''))
         sendJson(res, 200, { ok: true, ...result })
         return
       }
@@ -3125,23 +2828,9 @@ export function apply(ctx, config) {
   // 等 webServer 完成监听再起隧道
   const bootTimer = setTimeout(() => startQuickTunnel(ctx, runtime), 1200)
 
-  // 启动后自动同步一次（只有配了对端地址的一端才发起）
-  const syncTimer = runtime.remote
-    ? setTimeout(() => {
-      void sessions.autoSyncOnce()
-        .then((result) => {
-          if (result && result.ok === false && result.reason) {
-            ctx.logger?.info?.('dsh-pair-link: 自动同步跳过（%s）', result.reason)
-          }
-        })
-        .catch((err) => ctx.logger?.warn?.('dsh-pair-link: 自动同步失败 %s', err?.message ?? err))
-    }, 15000)
-    : null
-
   ctx.effect(() => () => {
     runtime.stopped = true
     clearTimeout(bootTimer)
-    if (syncTimer) clearTimeout(syncTimer)
     stopPairing(runtime)
     stopTunnel(runtime)
   })
